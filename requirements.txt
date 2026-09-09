@@ -1,0 +1,4 @@
+# Merge in dependencies as each module adds them. Keep versions pinned once stable.
+numpy
+librosa
+streamlit
