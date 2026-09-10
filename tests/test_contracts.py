@@ -15,6 +15,8 @@ from contracts.schemas import SttOutput, AllocatorOutput, RunPipelineResponse
 from stt.stt import transcribe
 from allocator.criticality import tag_criticality
 from allocator.allocate import allocate
+from channel.packet import Packet
+from channel.simulator import send
 
 
 def test_stt_output_matches_contract():
@@ -36,7 +38,32 @@ def test_allocator_output_matches_contract():
         confidence_per_token=result["confidence_per_token"],
         criticality_per_token=result["criticality_per_token"],
         protection_per_token=result["protection_per_token"],
-        bitrate_kbps=result["bitrate_kbps"],
+        allocated_for_bitrate_kbps=result["allocated_for_bitrate_kbps"],
+        language="en",
+    )
+
+def test_channel_matches_contract():
+    packet = Packet(
+        tokens=["Send", "coordinates", "4729"],
+        confidence_per_token=[0.9, 0.8, 0.5],
+        criticality_per_token=[0.2, 0.9, 1.0],
+        protection_per_token=[0.2, 0.9, 1.0],
+        allocated_for_bitrate_kbps=2.0,
+        language="en",
+    )
+
+    received = send(
+        packet,
+        bitrate_kbps=2.0,
+        noise_level=0.2,
+    )
+
+    assert isinstance(received, Packet)
+    assert len(received.tokens) == len(packet.tokens)
+    assert received.language == packet.language
+    assert (
+        received.allocated_for_bitrate_kbps
+        == packet.allocated_for_bitrate_kbps
     )
 
 

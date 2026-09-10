@@ -10,36 +10,73 @@ Plan:
 - Keep this software-only. No real network, no hardware.
 """
 
+"""
+channel/simulator.py
+
+Channel simulator.
+
+Contract:
+    send(packet, bitrate_kbps, noise_level) -> Packet
+
+The bitrate passed to send() is the CURRENT channel bitrate.
+
+The packet separately stores:
+    allocated_for_bitrate_kbps
+
+which records the bitrate the allocator assumed when
+calculating token protection.
+"""
+
 import random
-from typing import Any, Dict
+from copy import deepcopy
+
+from channel.packet import Packet
 
 
-def send(packet: Dict[str, Any], bitrate_kbps: float, noise_level: float) -> Dict[str, Any]:
+def send(
+    packet: Packet,
+    bitrate_kbps: float,
+    noise_level: float,
+) -> Packet:
     """
-    Args:
-        packet: see packet.py for schema
-        bitrate_kbps: simulated available bandwidth
-        noise_level: 0.0 (clean) to 1.0 (very noisy) — controls corruption probability
-    Returns:
-        packet: possibly with some fields dropped/corrupted, simulating a bad link.
-                Fields the allocator marked as high-priority should survive noise_level
-                that lower-priority fields don't — this is what proves the USP live.
+    Simulate transmission of a Packet through a noisy channel.
     """
-    # STUB — replace with real throttling/corruption logic.
-    degraded = dict(packet)
-    if random.random() < noise_level:
-        # placeholder: pretend low-priority content gets dropped first
-        pass
-    return degraded
+    if bitrate_kbps <= 0:
+        raise ValueError("bitrate_kbps must be greater than 0")
+
+    if not 0.0 <= noise_level <= 1.0:
+        raise ValueError("noise_level must be between 0.0 and 1.0")
+
+    received = deepcopy(packet)
+
+    # Day 1:
+    # Basic corruption model only.
+    #
+    # Day 2:
+    # Replace this with protection-aware degradation where
+    # high protection_per_token values improve survival.
+
+    for i, token in enumerate(received.tokens):
+        if random.random() < noise_level:
+            received.tokens[i] = "[CORRUPTED]"
+
+    return received
 
 
-def send_raw_audio(audio, bitrate_kbps: float, noise_level: float):
-    """Used only for the 'before' demo — show raw audio garbling under the same
-    bad channel that the compressed packet survives."""
-    # STUB — replace with real degradation (e.g. downsample, drop chunks, add noise).
+def send_raw_audio(
+    audio: bytes,
+    bitrate_kbps: float,
+    noise_level: float,
+) -> bytes:
+    """
+    Baseline-only raw-audio channel.
+    Day 1 scaffold only.
+    """
+    if bitrate_kbps <= 0:
+        raise ValueError("bitrate_kbps must be greater than 0")
+
+    if not 0.0 <= noise_level <= 1.0:
+        raise ValueError("noise_level must be between 0.0 and 1.0")
+
     return audio
 
-
-if __name__ == "__main__":
-    result = send({"text": "test"}, bitrate_kbps=2.0, noise_level=0.8)
-    print(result)
