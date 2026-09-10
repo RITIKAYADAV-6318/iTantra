@@ -8,3 +8,8 @@ __pycache__/
 *.pt
 *.ckpt
 .DS_Store
+
+# React frontend
+ui/frontend/node_modules/
+ui/frontend/dist/
+ui/frontend/.vite/

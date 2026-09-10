@@ -1,5 +1,11 @@
-# iTantra — 6-Day Build Plan
+# iTantra — Final 4-Day Build Plan (Full Scope, 6-Person Team)
 **SIH26173 | ISRO | Neural Transceiver for Low-Bitrate Radio Links**
+
+*This is the current, active plan — compressed from 6 days to 4, with full scope
+retained (including QIEA/QPSO and sound-event tags) because the team is committing
+full days across 6 people. Nothing is cut in advance; instead, end-of-day checkpoints
+tell you honestly whether something needs to be deprioritized, based on real progress
+— not a guess made today.*
 
 ---
 
@@ -9,127 +15,195 @@ iTantra enables clear voice communication over extremely low-bitrate, noisy radi
 
 ---
 
-## Non-Negotiables — Read Before Day 1
+## Final Tech Stack
 
-You submitted a specific USP: **criticality- and confidence-aware adaptive allocation**. That claim is now the thing judges will test you on. The single biggest risk to this project is spending 6 days polishing STT/TTS quality and never actually building the allocator — leaving your registered USP unproven on stage. Everything below is sequenced to protect that.
+| Layer | Tool | Purpose |
+|---|---|---|
+| Language (backend) | Python | STT, TTS, allocator, channel sim |
+| STT (ASR) | **faster-whisper, `"small"` model** (pretrained, CPU-friendly) — *IndicConformer was the original plan but requires NVIDIA NeMo/Linux setup; swapped Day 1. "small" chosen over "medium" for speed given the time constraint — verify against your actual rehearsed demo sentence before locking in (see contracts/interfaces.md change log). Same `transcribe()` contract either way, swap is one env var or one file if revisited.* | Speech → text + per-token confidence |
+| TTS | **Coqui TTS (`xtts_v2`)** (pretrained, voice-cloning from a short reference clip) — *AI4Bharat Indic-TTS was the original plan but has its own custom setup (repo clone, manual checkpoint pulls); swapped Day 1 for the same install-risk reasons as STT. Verify your two demo languages work cleanly on your actual install before relying on it — Coqui's multilingual support has shifted across versions.* | Text + speaker/prosody → natural speech |
+| Speaker embedding | SpeechBrain or Resemblyzer | Preserve speaker identity |
+| Signal processing | librosa | Pitch/energy extraction for prosody |
+| Criticality tagging | Plain Python + `re` | Flags numbers, coordinates, names, negations |
+| Bit allocator | Custom Python — greedy (must-have) + QIEA/QPSO (attempted in parallel, not sequential) | **Core USP** |
+| Channel simulator | Custom Python | Simulates bad bitrate/noise |
+| Sound-event tags | Custom Python, simple pattern/energy detection | Side-channel for non-verbal cues |
+| Packet format | Pydantic model (`contracts/schemas.py`) | Enforced schema shared across modules |
+| Backend API bridge | FastAPI | Exposes pipeline to UI over HTTP, serves audio as base64 |
+| Frontend/Dashboard | React (Vite) + recharts | Sliders, toggle, protection chart, before/after audio players |
+| Fallback dashboard | Streamlit | Backup only, in `ui/streamlit_fallback/` |
+| Contracts | `contracts/interfaces.md` + `contracts/schemas.py` | Frozen module boundaries |
+| Version control | Git + GitHub | — |
 
-1. **The allocator (with confidence + criticality inputs) is the product.** STT and TTS are necessary plumbing, not the differentiator. Don't over-invest in them once they "work."
-2. **Working > perfect, every day.** At the end of each day you must have something that *runs end-to-end*, even if crude. Never leave the pipeline broken overnight.
-3. **Scope to 2 languages only** (e.g., Hindi + English, or Hindi + one more you verify is strong). Everything else — Odia/Assamese/code-switching/sound-events — is a slide claim or a stub, not a live demo dependency.
-4. **Greedy allocator is your real fallback.** Build it on Day 3 no matter what. The quantum-inspired (QIEA/QPSO) version is layered on top only if time allows — if it isn't benchmarked and working by Day 5 evening, present it as "designed, partially benchmarked" rather than faking it live.
-5. **One laptop, software-only demo.** No hardware, no SDR, no second device. Two terminal windows / two browser tabs, one machine.
-6. **Never claim real-time conversation.** Frame it explicitly as "near-real-time, sentence-level voice relay" — like a walkie-talkie "over" pause. This is a pitch-language fix, not engineering work — but say it out loud in rehearsal so no one on the team accidentally overclaims on stage.
+**Not in scope regardless of timeline** (roadmap/slide claims only): ONNX Runtime, GNU Radio/SDR hardware, Raspberry Pi/Jetson, torchaudio, gRPC, BPE+entropy coding, FEC, post-quantum signatures. These were never buildable in any version of this plan without dedicated hardware and days this project doesn't have — they were cut for capability reasons, not time reasons, so the 4-day compression doesn't change this list.
 
 ---
 
-## Team Roles (assign before Day 1 starts)
+## The Rule That Makes "Build Everything" Survivable
+
+**Nothing new starts after Day 3 evening's checkpoint. Day 4 is fix-and-rehearse only.**
+This is not a scope cut — it's an honest cutoff point. You're not deciding today what
+to skip; you're giving yourselves a moment on Day 3 evening to look at real results and
+decide, with actual information, what needs to be simplified for the live demo versus
+what's solid enough to show as-is.
+
+---
+
+## Contracts-First Workflow (first 30 minutes of Day 1 — before any code)
+
+1. Whole team reads `contracts/interfaces.md` together.
+2. Lock every field: STT→Allocator, Allocator→Packet, Packet→Channel→TTS, Backend→UI.
+   Add anything missing now.
+3. Agree: any contract change gets posted to the team + logged in `interfaces.md`'s
+   change log + updated in `contracts/schemas.py`, all in the same commit.
+4. After this, everyone builds independently against the frozen contract — this is
+   what lets 6 people work in parallel without breaking each other's code.
+5. Run `tests/test_contracts.py` after touching any module boundary, and always
+   before merging into `main`.
+
+---
+
+## Team Roles
 
 | Role | Owns |
 |---|---|
-| STT lead | Pretrained model, fine-tuning if time allows, confidence score extraction, LID |
-| TTS lead | Pretrained model, speaker embedding + prosody conditioning |
-| Allocator/Systems lead | Criticality tagger, greedy allocator, QIEA/QPSO, channel simulator |
-| Integration/UI lead | Pipeline wiring, dashboard, demo toggle, bitrate slider |
-| Pitch/Docs lead | Slides, WER/benchmark numbers, demo script, backup video, rehearsal |
+| STT Lead | Pretrained STT, LID, per-token confidence — validated against `SttOutput` contract |
+| TTS Lead | Pretrained TTS, speaker embedding + prosody conditioning |
+| Allocator Lead (+ 1 helper on Day 2) | Criticality tagger, greedy allocator, QIEA/QPSO benchmarking — validated against `AllocatorOutput` contract |
+| Channel/Systems Lead | Channel simulator, protection-aware degradation, sound-event tags |
+| Integration/Backend Lead | FastAPI bridge, wires all modules, base64 audio encoding |
+| React/UI Lead | Dashboard: sliders, toggle, protection chart, before/after audio players |
+| Everyone | Pitch deck, testing, rehearsal on Day 4 — this is a whole-team effort, not one role's job |
 
-If you're fewer than 5 people, merge Allocator+Integration or STT+TTS — do **not** drop the Pitch/Docs role; a strong demo with a weak pitch loses to a weaker demo with a sharp pitch.
+With 6 people, one person doubles up (e.g., Allocator Lead also drives QIEA once
+greedy works, or Channel Lead also builds sound-events after the simulator is done).
 
 ---
 
 ## Day-by-Day Plan
 
-### Day 1 — Foundation: STT + TTS Working Alone
-**Goal by end of day:** You can speak a sentence and hear it come back out, no compression, no channel, no allocator — just STT → TTS, in one language.
+### Day 1 — Contracts + Four Parallel Tracks
+**Goal by end of day:** every module works standalone against the frozen contract,
+even if the data flowing between them is still mocked.
 
-- Set up repo structure: `stt/`, `tts/`, `channel/`, `allocator/`, `ui/`, `docs/`.
-- Pull a pretrained multilingual STT model (Whisper or AI4Bharat IndicConformer) — **do not train from scratch.**
-- Pull a pretrained TTS model (Coqui TTS / AI4Bharat Indic-TTS) — **do not train from scratch.**
-- Wrap STT as `audio -> text` and TTS as `text -> audio`, each as a plain Python function.
-- Confirm both work on your 2 chosen demo languages with 5-10 test sentences each, including at least one sentence with a number, name, and coordinate-style string (you'll need these later).
-- **Emphasize:** confirm the confidence score is accessible from your STT output *today* — you need this working, not just theoretically available, because Day 3 depends on it.
+- **First 30 min, whole team:** contracts kickoff (see above).
+- **STT Lead:** wrap pretrained faster-whisper (`"small"` model — see decision log in
+  `contracts/interfaces.md`), confirm per-token confidence is real and accessible,
+  test on both demo languages with 5-10 sentences each. **Explicitly test your actual
+  rehearsed demo sentence** (the one with a number/name/coordinate) — confirm `"small"`
+  transcribes it correctly. This step isn't optional: since `"medium"` isn't being
+  used as a fallback, audio recording quality (quiet room, closer mic, clear
+  enunciation) is now your main lever if the critical word comes out wrong — fix that
+  before assuming the model is the problem.
+- **TTS Lead:** wrap pretrained Coqui TTS (`xtts_v2` — see decision log in
+  `contracts/interfaces.md`), get voice-cloning conditioning working (pass a short
+  reference clip of the speaker as `speaker_embedding`), and confirm basic prosody.
+  **Explicitly test both demo languages** the same way STT was tested — Coqui's
+  multilingual language coverage has shifted across versions, don't assume it
+  handles your languages cleanly without checking.
+- **Allocator Lead:** build the criticality tagger. This doesn't depend on STT/TTS —
+  build and test it against mock text today.
+- **Channel/Backend Lead:** build the channel simulator skeleton and the FastAPI
+  scaffold (`ui/backend/api.py`) — both testable against mock data before real
+  modules exist.
+- **React Lead:** start the dashboard against the mock API responses already in the
+  repo (`ui/backend/api.py`'s stubs return valid mock JSON) — no need to wait on
+  anyone else to start building sliders, toggle, chart, and audio player UI.
+- **Evening:** everyone demos their module running standalone, live.
 
-**Cut if behind:** Drop the second language to a stub for now; get one language rock-solid first.
+### Day 2 — Real Allocator + QIEA in Parallel + Real Models
+**Goal by end of day:** greedy allocator works on real text with real confidence
+scores; QIEA is underway alongside it, not after it.
+
+- **Allocator Lead + 1 helper:** build the greedy allocator for real, validate against
+  `AllocatorOutput` contract. Test the "grid reference 4729"-style sentence — confirm
+  the number gets protected while filler doesn't. Once greedy works, the helper starts
+  QIEA/QPSO on the same objective function so it's not purely sequential.
+- **STT/TTS Leads:** finish real model integration on both languages; fine-tune only
+  if there's slack time.
+- **Channel/Backend Lead:** finish the channel simulator with protection-aware
+  degradation (high-protection tokens survive noise better than low-protection ones —
+  this is the mechanism that proves the USP live).
+- **React Lead:** continues building against mocks — audio players, sliders, chart,
+  all functional with fake data by tonight.
+- **Checkpoint (end of day, whole team, 10 min):** Does the greedy allocator work on
+  the test sentence? If yes, QIEA continues tomorrow as planned. If no, pull whoever's
+  ahead (likely React, since it works against mocks) to help the allocator team first
+  thing tomorrow morning — QIEA gets deprioritized for a few hours, not cut.
+
+### Day 3 — Full Integration + Sound-Events + QIEA Benchmark
+**Goal by end of day:** the whole pipeline runs end-to-end, live, on one laptop, with
+real audio in and real audio out.
+
+- **Backend Lead:** wires everything real — STT → allocator → channel → TTS behind
+  `/run_pipeline`, base64-encodes output audio for the frontend.
+- **Channel Lead** (once the simulator is solid): builds sound-event tagging
+  ([siren], [gunfire]) as a side-channel addition on top of the existing packet
+  schema — genuinely cheap once the packet format already exists.
+- **Allocator team:** benchmarks QIEA against greedy — a real quality-vs-bitrate
+  curve, not a claim. If the improvement isn't real and measurable, that's the honest
+  result — present greedy as the working system and QIEA as "designed, benchmarked,
+  here's what we found" rather than forcing a number that isn't there.
+- **React Lead:** swaps every mocked API call for the real backend, now that it's live.
+- **Checkpoint (end of day, whole team, mandatory):** run `tests/test_contracts.py`,
+  then run the full demo once, live, exactly as you'll present it. Anything broken
+  here is the first thing fixed tomorrow morning — **no new features start until this
+  checkpoint run is clean.**
+
+### Day 4 — Fix, Test, Pitch, Rehearse
+**Goal by end of day:** a demo that's been run enough times that nothing about it
+surprises you on stage.
+
+- **Morning:** fix whatever broke in yesterday's checkpoint run. This is priority zero
+  — nothing else starts until the end-to-end demo runs clean.
+- **Midday:** WER numbers on both languages using the locked `"small"` faster-whisper
+  model, finalize the QIEA-vs-greedy benchmark chart, run a quick informal listening
+  test with 2-3 people outside the team, record a full backup video of the exact demo
+  sequence. UI theme (dark HUD style, already built — see
+  `docs/SCREEN_ARCHITECTURE.md`) gets wired to real data now that the backend is live;
+  if it's already fully wired from earlier days, this is just a final pass, not new
+  work.
+- **Afternoon:** build the pitch deck — solution summary, USP line, live demo
+  walkthrough, bandwidth-savings number, WER table, QIEA benchmark chart, roadmap
+  slide for anything genuinely unfinished.
+- **Evening — protected no matter what:** rehearse the full live demo at least 5
+  times back to back, including the audio-playback moment and the bitrate-slider
+  moment. If something is still rough, simplify it for the demo rather than skipping
+  rehearsal to keep polishing it. Rehearse answers to the known objections:
+  confidently-wrong outputs, real-time claims, novelty, quantum-inspired skepticism.
 
 ---
 
-### Day 2 — Speaker Identity, Prosody, and the Compression Packet
-**Goal by end of day:** Reconstructed speech sounds like the actual speaker, and you have a defined, small "packet" format.
+## UI Theme — Dark HUD Style, Clarity First
 
-- Extract a speaker embedding (x-vector) once per session — not per sentence.
-- Extract pitch/energy (librosa) per sentence; keep it small (a handful of numbers, not raw signal).
-- Condition TTS output on speaker embedding + prosody so the voice is recognizable, not robotic.
-- Define your packet schema now, on paper: `{text_tokens, speaker_id, prosody_vector, criticality_flags, confidence_flags}`. This schema is what the allocator will act on tomorrow — get the fields agreed today so nobody's building against a moving target.
-- Measure packet size vs. raw audio size and log the number — this is a concrete demo statistic judges respond to.
+The dashboard uses a dark, glowing-blue "command center" aesthetic — it matches the
+ISRO/defense-comms framing of the pitch. **Clarity is the non-negotiable priority over
+the theme**: every visual element must map to a real, live value from the pipeline; if
+it's decorative and doesn't serve legibility, it doesn't get built. See
+`docs/SCREEN_ARCHITECTURE.md` for the full wireframe, panel-by-panel feature map, and
+the "Node" concept that answers how sender/receiver screens work — both for the
+one-laptop demo and for scaling to real multi-device deployment later.
 
-**Emphasize:** "sounds like the person, not a robot" is one of your registered USP bullets — don't skip prosody conditioning to save time; it's cheap relative to its payoff.
-
-**Cut if behind:** Skip BPE/entropy coding sophistication — plain text is already tiny; don't burn a day compressing something that's already small.
-
----
-
-### Day 3 — The Allocator: Criticality + Confidence (Your Core USP)
-**Goal by end of day:** A working greedy allocator that reads confidence + criticality per word and visibly protects the "important + unsure" words when bandwidth drops.
-
-- Build a lightweight criticality tagger: regex/dictionary pass is enough — flag numbers, names, coordinates, negations ("not", "no"), callsigns. Do not overbuild this with a full NER model.
-- Confirm per-token confidence is flowing from STT (built Day 1).
-- Build the **greedy baseline allocator first**: given a bitrate budget, protect high-criticality + low-confidence words first (extra FEC bits or a phonetic/raw-audio fallback for that word), compress everything else harder as bandwidth drops.
-- Test with your prepared "grid reference 4729" -style sentence: confirm that under a tight bitrate, the number survives clean while filler words degrade first.
-- **This is the single most important checkpoint in the whole 6 days.** If this isn't working by Day 3 evening, everything else is secondary — reallocate people here on Day 4 morning if needed.
-
-**Only if Day 3 finishes early:** Start the QIEA/QPSO version on top of the same objective function (confidence + criticality + channel state). Benchmark it against greedy on a quality-vs-bitrate curve. If you don't get a clean, real improvement number, don't claim one — present greedy as "working system," QIEA as "designed, in progress" on a slide with pseudocode.
+Already built in the repo: `ui/frontend/src/theme.js` (shared colors/fonts/panel
+styles), `RadialGauge.jsx` (live bitrate readout, styled like the reference HUD but
+showing real data instead of decoration), and matching restyles of `ModeToggle.jsx`,
+`BitrateSlider.jsx`, `AudioPlayer.jsx`, `ProtectionChart.jsx`, and `App.jsx`.
 
 ---
 
-### Day 4 — Channel Simulator + Full Pipeline Integration
-**Goal by end of day:** One continuous pipeline: mic in → STT → allocator → simulated bad channel → TTS → speaker out, running as two processes (Sender/Receiver) on one laptop.
+## What to Emphasize Throughout (check every evening)
 
-- Build the channel simulator: throttle bitrate (e.g., configurable 1-5 kbps), add noise/packet loss. Software only — no GNU Radio hardware dependency needed for the demo.
-- Confirm raw audio through this channel visibly breaks down (this is your "before" demo — you need it to fail convincingly and consistently).
-- Confirm your compressed, allocator-protected packet survives the same channel (your "after" demo).
-- Wire Sender and Receiver as two separate processes/windows, connected only through the simulator — not a real network hop.
-- **Emphasize:** rehearse the failure case as much as the success case. A "before" demo that doesn't clearly fail undercuts your entire pitch.
-
-**Cut if behind:** Skip FEC/Reed-Solomon sophistication — a simple "drop/corrupt X% of low-priority bits" simulation is enough to sell the story.
-
----
-
-### Day 5 — Dashboard, Sound-Event Tags, Polish, Edge Case Pass
-**Goal by end of day:** A live dashboard judges can watch, the sound-event side-channel working, and the system tested against realistic failure modes.
-
-- Build a simple Streamlit or React dashboard: detected language, live bitrate meter, packet size vs. raw size, a toggle for "normal call" vs. "iTantra mode," and a draggable bitrate slider.
-- Add the lightweight sound-event tag ([siren], [gunfire], [distress-tone]) — cheap, few-bytes side-channel, high narrative payoff for the defense/disaster framing. Don't build full sound-event detection from scratch; a simple energy/pattern-based classifier on a few pre-recorded clips is enough for a hackathon demo.
-- Run through edge cases deliberately: silence, overlapping speech, very degraded input — fix the 2-3 worst failures you find, don't chase every bug.
-- Record a full backup video of the exact demo sequence working, in case live audio fails on stage.
-- **Emphasize:** the bitrate-slider "wow" moment (drag it down live, watch words survive while filler degrades) is your best single beat — protect the time to rehearse it, don't let dashboard polish eat into rehearsal time.
-
-**Cut if behind:** Sound-event tags become a slide claim with one pre-recorded example instead of a live feature.
-
----
-
-### Day 6 — Testing, Benchmarks, Pitch, Rehearsal
-**Goal by end of day:** Numbers ready, story tight, demo rehearsed until boring.
-
-- Run WER on your 2 demo languages and record the numbers — use as a slide, not a live risk.
-- If you have a QIEA benchmark, put the quality-vs-bitrate curve on a slide. If not, put the greedy-vs-nothing comparison instead — still a real number.
-- Get a few people outside the team to blind-listen to reconstructed vs. original speech; note their reaction as an informal quality claim.
-- Build the pitch deck: solution summary, USP line, live demo, bandwidth-savings number (e.g., "X kbps down to under 1 kbps"), one simple diagram of the allocator (no deep math on stage), roadmap slide for under-represented languages and code-switching (explicitly framed as future work, not live-demoed).
-- **Rehearse the demo end-to-end at least 5 times**, including deliberately triggering the "before" failure and the bitrate-slider moment. Time it — target under 3 minutes for the live segment.
-- Prepare answers, out loud, as a team, for the questions you already know are coming:
-  - *"Doesn't ASR error just become a confidently-wrong TTS output?"* → explain confidence+criticality flagging as your direct answer.
-  - *"Is this real-time?"* → "near-real-time, sentence-level relay," walkie-talkie framing.
-  - *"Is this a novel idea?"* → own it: STT-TTS relay is established research; your differentiator is Indian-language coverage, prosody preservation, and the criticality-aware allocator.
-  - *"Why quantum-inspired, why not just a heuristic?"* → have the benchmark ready, or the honest "in progress, here's the theory" fallback.
-
----
-
-## What to Emphasize Throughout (checklist to re-check every evening)
-
-- [ ] Does the demo still run end-to-end right now, live, on this laptop?
-- [ ] Does the criticality+confidence allocator visibly protect a number/name under a bad channel? (This is the one thing you cannot cut.)
+- [ ] Does `python tests/test_contracts.py` still pass?
+- [ ] Does the demo run end-to-end right now, live, on this laptop?
+- [ ] Does the allocator visibly protect a number/name under a bad channel?
+- [ ] **Does `"small"` faster-whisper correctly transcribe your rehearsed demo
+      sentence, especially the critical word (number/name/coordinate)?** If not, fix
+      the recording environment before rehearsal, not the model.
+- [ ] Do the before/after audio players actually play something audibly different?
 - [ ] Does reconstructed speech still sound like the speaker, not robotic?
-- [ ] Is the "before" (raw audio) failure still clearly, audibly broken?
-- [ ] Have you avoided claiming real-time duplex conversation anywhere in your slides or script?
-- [ ] Is every claim you're making backed by a number you can show, or clearly labeled as roadmap/future work?
+- [ ] Have you avoided claiming real-time duplex conversation anywhere?
+- [ ] Is every claim backed by a number, or clearly labeled as roadmap?
+- [ ] (Day 3+) Did today's checkpoint run pass before anyone started new work?
 
 ## One-Line Pitch (memorize this)
 

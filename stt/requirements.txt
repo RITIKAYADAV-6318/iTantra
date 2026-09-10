@@ -1,1 +1,1 @@
-# stt module dependencies
+faster-whisper

@@ -1,4 +1,9 @@
 # Merge in dependencies as each module adds them. Keep versions pinned once stable.
 numpy
 librosa
-streamlit
+faster-whisper
+TTS
+fastapi
+uvicorn[standard]
+pydantic
+streamlit  # kept only for ui/streamlit_fallback — not the primary dashboard
