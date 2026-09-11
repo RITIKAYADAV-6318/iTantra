@@ -8,6 +8,7 @@ __pycache__/
 *.pt
 *.ckpt
 .DS_Store
+node_modules/
 
 # React frontend
 ui/frontend/node_modules/
