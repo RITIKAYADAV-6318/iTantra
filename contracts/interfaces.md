@@ -36,7 +36,8 @@ anything else from STT.
 | `confidence_per_token` | `list[float]` | passed through unchanged from STT |
 | `criticality_per_token` | `list[float]` | `[0,1]` per token, from the criticality tagger |
 | `protection_per_token` | `list[float]` | `[0,1]` per token — how much bandwidth/redundancy this token got. **This is the field the whole USP hinges on — it must always be present and the same length as `tokens`.** |
-| `bitrate_kbps` | `float` | the channel budget this packet was allocated against |
+| `allocated_for_bitrate_kbps` | `float` | bitrate the allocator assumed while calculating token protection |
+| `language` | `str` | language passed through from STT, e.g. `"hi"`, `"en"` |
 | `speaker_embedding` | `object \| None` | optional, from TTS module's extractor |
 | `prosody_vector` | `object \| None` | optional |
 | `sound_event_tag` | `str \| None` | optional, e.g. `"[siren]"` |
@@ -50,10 +51,14 @@ return one of these, not a raw dict.
 
 **Channel simulator contract:**
 - Input: a `Packet` + `bitrate_kbps: float` + `noise_level: float` (0=clean, 1=very noisy)
+
+- `bitrate_kbps` is the **current channel bitrate**. It may differ from
+  `packet.allocated_for_bitrate_kbps`, which records the bitrate the allocator
+  assumed when calculating protection.
+
 - Output: a `Packet` — same shape, but some fields may be degraded/corrupted based on
-  `noise_level` and each token's `protection_per_token` value. **Fields with high
-  protection should survive noise better than fields with low protection — this is
-  the mechanism that proves the USP live.**
+  `noise_level` and each token's `protection_per_token` value. **Day 1 uses a basic
+  corruption model; protection-aware degradation will be added later.**
 - Separately, `send_raw_audio(audio, bitrate_kbps, noise_level) -> audio` exists only
   for the "before" baseline demo — it does not go through the Packet format at all.
 
@@ -98,3 +103,4 @@ who to ask about it.
 | Day 1 | STT implementation: IndicConformer → faster-whisper (contract unchanged) | STT Lead | IndicConformer needs NeMo/Linux setup — too much install risk for Day 1. `transcribe()` signature identical either way. |
 | Day 1 | STT model size locked to "small" (not "medium") | STT Lead | Time constraint — "small" is faster and lower-risk. Verified against rehearsed demo sentence before locking in (see docs/STATUS.md). If a critical word (number/name/coordinate) is ever mistranscribed, fix audio quality first (quiet room, closer mic) before considering "medium". |
 | Day 1 | TTS implementation: AI4Bharat Indic-TTS → Coqui TTS (xtts_v2) (synthesize() contract unchanged) | TTS Lead | Applying the same install-risk check already done for STT. Indic-TTS needs a custom repo setup with manual checkpoint pulls; Coqui TTS is a plain `pip install`. Must verify both demo languages work cleanly on the team's actual install before relying on it live. |
+| Day 1 | Channel contract: allocator bitrate renamed to `allocated_for_bitrate_kbps`; `language` added to Packet; channel `send()` now takes/returns `Packet` with current `bitrate_kbps` passed separately | Channel/Systems Lead | Removes ambiguity between allocator bitrate assumptions and current channel bitrate, and makes the Packet/Channel boundary consistent |

@@ -31,7 +31,7 @@ def allocate_greedy(text: str, confidence: List[float], criticality: List[float]
         "confidence_per_token": confidence,
         "criticality_per_token": criticality,
         "protection_per_token": protection,
-        "bitrate_kbps": channel_bitrate_kbps,
+        "allocated_for_bitrate_kbps": channel_bitrate_kbps,
     }
 
 

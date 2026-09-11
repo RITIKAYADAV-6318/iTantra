@@ -11,19 +11,23 @@ from typing import List, Optional
 
 @dataclass
 class Packet:
-    tokens: List[str]                       # tokenized transcribed text
-    confidence_per_token: List[float]       # from stt.transcribe
-    criticality_per_token: List[float]      # from allocator.tag_criticality
-    protection_per_token: List[float]       # from allocator.allocate — how many
-                                             # "bits"/redundancy each token got
+    tokens: List[str]
+    confidence_per_token: List[float]
+    criticality_per_token: List[float]
+    protection_per_token: List[float]
+
+    # Bitrate assumed by allocator while calculating protection.
+    allocated_for_bitrate_kbps: float
+
+    # Passed through from STT.
+    language: str = "en"
+
     speaker_embedding: Optional[object] = None
     prosody_vector: Optional[object] = None
-    sound_event_tag: Optional[str] = None   # e.g. "[siren]", "[gunfire]", or None
-    language: str = "en"
+    sound_event_tag: Optional[str] = None
 
     def to_dict(self):
         return self.__dict__
-
 
 if __name__ == "__main__":
     p = Packet(
@@ -31,5 +35,7 @@ if __name__ == "__main__":
         confidence_per_token=[0.98, 0.95, 0.60, 0.55, 0.40],
         criticality_per_token=[0.1, 0.3, 0.9, 0.9, 1.0],
         protection_per_token=[0.1, 0.3, 0.9, 0.9, 1.0],
+        allocated_for_bitrate_kbps=2.0,
+        language="en",
     )
     print(p.to_dict())

@@ -38,7 +38,11 @@ class AllocatorOutput(BaseModel):
     confidence_per_token: List[float]
     criticality_per_token: List[float]
     protection_per_token: List[float]
-    bitrate_kbps: float
+    # Bitrate the allocator assumed while calculating protection.
+    allocated_for_bitrate_kbps: float
+
+    # Passed through from STT so language is not lost.
+    language: str = "en"
     speaker_embedding: Optional[object] = None
     prosody_vector: Optional[object] = None
     sound_event_tag: Optional[str] = None
