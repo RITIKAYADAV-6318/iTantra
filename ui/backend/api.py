@@ -18,9 +18,9 @@ from pydantic import BaseModel
 from contracts.schemas import RunPipelineResponse
 
 from stt.stt import transcribe, detect_language
-from allocator.criticality import tag_criticality
+#from allocator.criticality import tag_criticality
 from allocator.allocate import allocate
-from channel.packet_adapter import allocator_output_to_packet
+#from channel.packet_adapter import allocator_output_to_packet
 from channel.simulator import send, send_raw_audio
 from tts.tts import synthesize
 
@@ -64,32 +64,32 @@ def run_pipeline(req: RunRequest):
 
     language = detect_language(audio_chunk)
     text, confidence = transcribe(audio_chunk)
-    criticality = tag_criticality(text)
+
 
     if req.mode == "baseline":
         # "before" demo: raw audio through the same bad channel, no allocator.
         degraded_audio = send_raw_audio(audio_chunk, req.bitrate_kbps, req.noise_level)
         packet_bytes = 0  # not applicable in baseline mode
         protection = [0.0] * len(text.split())
+        criticality = [0.0] * len(text.split())
         audio_out = degraded_audio
         raw_bytes = len(degraded_audio) if degraded_audio else 0
     else:
-        allocator_output = allocate(
-            text,
-            confidence,
-            criticality,
-            req.bitrate_kbps,
+        packet = allocate(
+        text=text,
+        confidence=confidence,
+        channel_bitrate_kbps=req.bitrate_kbps,
+        language=language,
         )
 
-        packet = allocator_output_to_packet(allocator_output)
-
         received = send(
-            packet,
-            req.bitrate_kbps,
-            req.noise_level,
+        packet,
+        req.bitrate_kbps,
+        req.noise_level,
         )
 
         protection = received.protection_per_token
+        criticality = received.criticality_per_token
         packet_bytes = len(str(received.to_dict()))  # placeholder size metric — refine later
         audio_out = synthesize(text=" ".join(received.tokens))
         raw_bytes = 0
