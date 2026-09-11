@@ -30,11 +30,23 @@ import re
 import json
 import unicodedata
 
-print("Loading AI Language Model (English)...")
-try:
-    nlp_en = spacy.load("en_core_web_sm")
-except OSError:
-    raise OSError("spaCy model not found. Run: python -m spacy download en_core_web_sm")
+# FIX (contract review): loading the spaCy model at IMPORT time means
+# `import tagger` can crash the whole process if the model isn't
+# installed — including indirectly, e.g. if the API imports allocator,
+# which imports tagger, before the API has even started handling
+# requests. Lazy-loading it on first actual use means importing this
+# module is always safe; only calling _tag_english() can fail, with a
+# clear error at the point where it's actually needed.
+_nlp_en = None
+
+def _get_nlp_en():
+    global _nlp_en
+    if _nlp_en is None:
+        try:
+            _nlp_en = spacy.load("en_core_web_sm")
+        except OSError:
+            raise OSError("spaCy model not found. Run: python -m spacy download en_core_web_sm")
+    return _nlp_en
 
 # ============================================================
 # PATTERNS
@@ -243,7 +255,7 @@ def find_negation_map(doc):
 # ENGLISH TAGGER
 # ============================================================
 def _tag_english(text: str) -> list:
-    doc = nlp_en(text)
+    doc = _get_nlp_en()(text)
     negated_targets = find_negation_map(doc)
     spoken_callsign_spans = find_spoken_callsign_spans(doc)
     results = []
@@ -397,7 +409,11 @@ def assign_criticality(text: str, lang: str = "en") -> dict:
     overall_score, priority = calculate_overall_priority(word_scores)
     return {
         "original_text": text,
-        "language": lang.upper(),
+        "language": lang,   # FIX: lowercase "en"/"hi" to match the frozen
+                             # contract, not "EN"/"HI" — this was a real
+                             # mismatch that would've broken STT->tagger->
+                             # allocator->TTS/UI language checks anywhere
+                             # they compare against the lowercase form.
         "total_tokens": len(word_scores),
         "packet_priority": priority,
         "priority_score": overall_score,

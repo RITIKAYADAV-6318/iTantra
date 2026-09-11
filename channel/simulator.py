@@ -57,7 +57,10 @@ def send(
     # high protection_per_token values improve survival.
 
     for i, token in enumerate(received.tokens):
-        if random.random() < noise_level:
+        protection = received.protection_per_token[i]
+        corruption_probability = noise_level * (1.0 - protection)
+
+        if random.random() < corruption_probability:
             received.tokens[i] = "[CORRUPTED]"
 
     return received

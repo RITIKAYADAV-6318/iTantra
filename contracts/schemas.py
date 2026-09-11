@@ -42,7 +42,8 @@ class AllocatorOutput(BaseModel):
     allocated_for_bitrate_kbps: float
 
     # Passed through from STT so language is not lost.
-    language: str = "en"
+    # Required because the allocator must never silently assume English.
+    language: str
     speaker_embedding: Optional[object] = None
     prosody_vector: Optional[object] = None
     sound_event_tag: Optional[str] = None
