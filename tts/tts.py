@@ -1,92 +1,161 @@
 """
-TTS module — owner: [TTS Lead name]
+TTS Wrapper — Coqui XTTS v2
+Day 1 deliverable: TTS Lead
 
-Contract: contracts/schemas.py-compatible
-    synthesize(text, speaker_embedding, prosody_vector) -> audio (WAV bytes)
+Goal for today (per build plan):
+  1. Wrap pretrained XTTS v2.
+  2. Get voice-cloning conditioning working (reference clip -> speaker_embedding).
+  3. Confirm basic prosody (i.e. output isn't flat/robotic).
+  4. Explicitly test BOTH demo languages — don't assume XTTS v2 handles them
+     cleanly just because they're "in the docs". Coqui's multilingual coverage
+     has shifted across releases, so this script prints what YOUR installed
+     version actually reports before trusting it.
 
-DECISION LOG (Day 1): Using Coqui TTS (xtts_v2) instead of AI4Bharat Indic-TTS,
-applying the same install-risk check already done for STT. AI4Bharat Indic-TTS is a
-separate research toolkit with its own custom setup (repo clone, manual checkpoint
-pulls) — lower risk than NeMo, but still more setup than a plain pip install.
-Coqui TTS installs with `pip install TTS` on Windows/Mac/Linux with no special
-system dependency, and xtts_v2 does voice-cloning-style synthesis from a short
-reference clip — which fits the "sounds like the real speaker" USP directly.
+Known, accepted caveat (documented, not hidden — same policy as the tagger):
+  check_prosody() below is a CHEAP heuristic (pitch/energy variance), not a
+  perceptual quality score. It only proves the output isn't monotone/robotic.
+  It does NOT prove the cloned voice actually sounds like the reference
+  speaker — that needs a human listening test (Day 4 checklist item), not a
+  script number.
 
-VERIFY ON DAY 1 (same as STT's language check): confirm xtts_v2 handles your two
-demo languages cleanly on your actual install — Coqui's multilingual language
-support has shifted across versions, don't assume, test it against a real sentence
-before relying on it for the live demo.
-
-Swappable later without touching anything downstream — only this file's internals
-change, everyone else only depends on synthesize()'s signature.
+License note (flag to the team, not a blocker for a hackathon demo):
+  XTTS v2 ships under Coqui's CPML license, which restricts commercial use.
+  Fine for SIH demo/roadmap purposes — just don't claim "production-ready"
+  on the pitch deck without noting this.
 """
 
 import os
-from typing import Optional
+import json
+import base64
+import numpy as np
+import librosa
+from TTS.api import TTS
 
-_tts = None
+# TODO: confirm against your actual rehearsed demo languages / contracts/interfaces.md
+DEMO_LANGUAGES = ["en", "hi"]
 
-# Configurable via env var, same pattern as STT's WHISPER_MODEL_SIZE — lets you
-# swap models without editing code.
-_MODEL_NAME = os.environ.get("TTS_MODEL_NAME", "tts_models/multilingual/multi-dataset/xtts_v2")
-
-
-def _get_tts():
-    global _tts
-    if _tts is None:
-        from TTS.api import TTS as CoquiTTS
-        _tts = CoquiTTS(model_name=_MODEL_NAME, progress_bar=False, gpu=False)
-    return _tts
+MODEL_NAME = "tts_models/multilingual/multi-dataset/xtts_v2"
 
 
-def synthesize(text: str, speaker_embedding: Optional[str] = None,
-               prosody_vector: Optional[object] = None, language: str = "en"):
-    """
-    Args:
-        text: text to speak (already reconstructed from received packet)
-        speaker_embedding: NOTE — for xtts_v2, this is interpreted as a path to a
-                            short reference WAV of the speaker's voice (voice
-                            cloning), not an abstract embedding vector. Kept the
-                            same parameter name for contract compatibility with
-                            other TTS backends that do use a real embedding.
-        prosody_vector: not directly used by xtts_v2 (it infers prosody from the
-                         reference clip) — kept for contract compatibility, and for
-                         a future TTS backend that does take explicit prosody input.
-        language: target language code, e.g. "en", "hi"
-    Returns:
-        audio: WAV bytes
-    """
-    tts = _get_tts()
-    out_path = "_tts_temp_output.wav"
-    tts.tts_to_file(
-        text=text,
-        speaker_wav=speaker_embedding,  # None is valid — falls back to a default voice
-        language=language,
-        file_path=out_path,
-    )
-    with open(out_path, "rb") as f:
-        audio_bytes = f.read()
-    os.remove(out_path)
-    return audio_bytes
+class TTSWrapper:
+    def __init__(self, device: str = "cpu"):
+        print("Loading Coqui XTTS v2 model...")
+        self.tts = TTS(MODEL_NAME).to(device)
+        self._verify_supported_languages()
 
+    def _verify_supported_languages(self):
+        """
+        Don't trust the README — trust what THIS install reports. Hindi support
+        in particular was added later than several other languages in XTTS v2's
+        history, so this check is not optional.
+        """
+        langs = None
+        try:
+            langs = self.tts.languages
+        except Exception as e:
+            print(f"[WARN] Could not read supported languages from model: {e}")
 
-def extract_speaker_embedding(audio_chunk):
-    """For xtts_v2 voice cloning, the 'embedding' is really just a path to a short
-    reference clip of the speaker. If audio_chunk is already a file path, this is
-    effectively a passthrough — kept as a function so other TTS backends (that do
-    real embedding extraction) can implement this properly without changing the
-    call site."""
-    return audio_chunk if isinstance(audio_chunk, str) else None
+        print(f"[TTS] Model reports supported languages: {langs}")
+        for lang in DEMO_LANGUAGES:
+            if langs and lang not in langs:
+                print(f"[WARNING] '{lang}' is NOT in this install's reported language list. "
+                      f"Do not assume it will work — the test block below will tell you for sure.")
 
+    def synthesize(self, text: str, language: str, speaker_wav: str, out_path: str = None) -> str:
+        """
+        text: reconstructed transcript text
+        language: e.g. 'en' or 'hi' — must be in DEMO_LANGUAGES
+        speaker_wav: path to a short (6-10s), clean, single-speaker reference clip
+                     — this IS the "speaker_embedding" input per the contract;
+                     XTTS computes the embedding internally from this clip.
+        """
+        if language not in DEMO_LANGUAGES:
+            raise ValueError(f"Language '{language}' not in DEMO_LANGUAGES={DEMO_LANGUAGES}")
+        if not os.path.exists(speaker_wav):
+            raise FileNotFoundError(f"Reference speaker clip not found: {speaker_wav}")
 
-def extract_prosody(audio_chunk):
-    """Pitch (F0) + energy via librosa — not used by xtts_v2 directly, but kept for
-    contract compatibility and for the prosody-distress-detection stretch goal."""
-    # STUB — implement with librosa if the distress-detection feature is attempted.
-    return None
+        if out_path is None:
+            out_path = f"_tmp_tts_out_{language}.wav"
+
+        self.tts.tts_to_file(
+            text=text,
+            speaker_wav=speaker_wav,
+            language=language,
+            file_path=out_path,
+        )
+        return out_path
+
+    def to_packet_format(self, wav_path: str) -> dict:
+        """
+        Rough draft of what the Backend Lead will likely want for base64-over-HTTP.
+        RENAME FIELDS to match contracts/schemas.py once you've read it with the team.
+        """
+        audio, sr = librosa.load(wav_path, sr=None)
+        with open(wav_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        return {
+            "audio_base64": b64,
+            "sample_rate": sr,
+            "duration_sec": round(len(audio) / sr, 2),
+        }
+
+    def check_prosody(self, wav_path: str) -> dict:
+        """
+        Cheap sanity check only — see module docstring for what this does NOT prove.
+        Flags monotone/robotic output via pitch (F0) variance across the clip.
+        """
+        y, sr = librosa.load(wav_path, sr=None)
+        f0, voiced_flag, _ = librosa.pyin(
+            y, fmin=librosa.note_to_hz("C2"), fmax=librosa.note_to_hz("C7")
+        )
+        f0_voiced = f0[voiced_flag] if voiced_flag is not None else np.array([])
+        energy = librosa.feature.rms(y=y)[0]
+
+        return {
+            "pitch_mean_hz": float(np.nanmean(f0_voiced)) if len(f0_voiced) else None,
+            "pitch_std_hz": float(np.nanstd(f0_voiced)) if len(f0_voiced) else None,
+            "energy_mean": float(np.mean(energy)),
+            "energy_std": float(np.std(energy)),
+            # heuristic threshold — tune after listening to a few real outputs
+            "flag_monotone": bool(len(f0_voiced) and np.nanstd(f0_voiced) < 5.0),
+        }
 
 
 if __name__ == "__main__":
-    # Quick manual test: python tts.py
-    audio = synthesize("This is a test sentence.", language="en")
-    print(f"Generated audio bytes: {len(audio)}")
+    """
+    Self-test — mirrors the Allocator Lead's approach: test real sentences per
+    language, including the actual critical-word sentence, not just a filler
+    happy-path line. Requires a short reference clip per language/speaker in
+    ./reference_clips/ (record 6-10s of clear, quiet-room speech per speaker).
+    """
+    wrapper = TTSWrapper()
+
+    test_sentences = {
+        "en": [
+            "We need help at grid reference two eight point five north.",  # critical-word sentence
+            "The weather is good today.",                                  # neutral control
+        ],
+        "hi": [
+            "हमें मदद चाहिए।",     # critical Hindi sentence
+            "आज मौसम अच्छा है।",   # neutral Hindi control
+        ],
+    }
+
+    reference_clips = {
+        "en": "reference_clips/speaker_en.wav",
+        "hi": "reference_clips/speaker_hi.wav",  # reuse same file if it's one speaker/voice
+    }
+
+    results = []
+    for lang, sentences in test_sentences.items():
+        for sentence in sentences:
+            try:
+                out_path = wrapper.synthesize(sentence, lang, reference_clips[lang])
+                prosody = wrapper.check_prosody(out_path)
+                status = "OK"
+            except Exception as e:
+                prosody = None
+                status = f"FAILED: {e}"
+            results.append({"lang": lang, "text": sentence, "status": status, "prosody": prosody})
+
+    print(json.dumps(results, indent=2, ensure_ascii=False))
