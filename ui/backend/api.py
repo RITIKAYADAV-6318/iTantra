@@ -1,0 +1,110 @@
+"""
+FastAPI bridge — owner: Integration/UI Lead (backend half)
+
+Purpose: thin layer exposing the Python pipeline to the React dashboard.
+This is NOT a transceiver protocol — just enough HTTP surface for the UI to call
+STT/allocator/channel/TTS and get JSON back to render.
+
+Run: uvicorn ui.backend.api:app --reload --port 8000
+(run from repo root so the `stt`, `tts`, `channel`, `allocator` imports resolve)
+"""
+
+import base64
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from stt.stt import transcribe, detect_language
+from allocator.criticality import tag_criticality
+from allocator.allocate import allocate
+from channel.simulator import send, send_raw_audio
+from tts.tts import synthesize
+
+app = FastAPI(title="iTantra Pipeline API")
+
+# Allow the React dev server (default Vite port) to call this API during development.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class RunRequest(BaseModel):
+    # STUB — replace `audio_base64` handling with real mic capture / file upload
+    # once the frontend audio pipeline is decided.
+    audio_base64: str | None = None
+    bitrate_kbps: float = 5.0
+    noise_level: float = 0.3
+    mode: str = "itantra"  # "itantra" or "baseline"
+
+
+class RunResponse(BaseModel):
+    language: str
+    text: str
+    confidence_per_token: list[float]
+    criticality_per_token: list[float]
+    protection_per_token: list[float]
+    raw_audio_bytes: int
+    packet_bytes: int
+    mode: str
+    audio_base64: str | None = None   # base64-encoded audio for playback in the UI
+    audio_format: str = "wav"         # tell the frontend how to decode/play it
+
+
+def _encode_audio(audio_bytes: bytes | None) -> str | None:
+    """Turns raw audio bytes into a base64 string the frontend can play directly.
+    Returns None if there's no audio yet (e.g. stubs still returning empty bytes)."""
+    if not audio_bytes:
+        return None
+    return base64.b64encode(audio_bytes).decode("utf-8")
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/run_pipeline", response_model=RunResponse)
+def run_pipeline(req: RunRequest):
+    # STUB — audio_chunk decoding not yet wired.
+    audio_chunk = None
+
+    language = detect_language(audio_chunk)
+    text, confidence = transcribe(audio_chunk)
+    criticality = tag_criticality(text)
+
+    if req.mode == "baseline":
+        # "before" demo: raw audio through the same bad channel, no allocator.
+        degraded_audio = send_raw_audio(audio_chunk, req.bitrate_kbps, req.noise_level)
+        packet_bytes = 0  # not applicable in baseline mode
+        protection = [0.0] * len(text.split())
+        audio_out = degraded_audio
+        raw_bytes = len(degraded_audio) if degraded_audio else 0
+    else:
+        packet = allocate(text, confidence, criticality, req.bitrate_kbps)
+        received = send(packet, req.bitrate_kbps, req.noise_level)
+        protection = received["protection_per_token"]
+        packet_bytes = len(str(received))  # placeholder size metric — refine later
+        audio_out = synthesize(text=" ".join(received["tokens"]))
+        raw_bytes = 0
+
+    return RunResponse(
+        language=language,
+        text=text,
+        confidence_per_token=confidence,
+        criticality_per_token=criticality,
+        protection_per_token=protection,
+        raw_audio_bytes=raw_bytes,
+        packet_bytes=packet_bytes,
+        mode=req.mode,
+        audio_base64=_encode_audio(audio_out),
+        audio_format="wav",
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

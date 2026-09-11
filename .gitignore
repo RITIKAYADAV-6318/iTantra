@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+.env
+*.wav
+*.mp3
+*.onnx
+*.pt
+*.ckpt
+.DS_Store
+
+# React frontend
+ui/frontend/node_modules/
+ui/frontend/dist/
+ui/frontend/.vite/
