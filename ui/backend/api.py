@@ -15,9 +15,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from contracts.schemas import RunPipelineResponse
+
 from stt.stt import transcribe, detect_language
 from allocator.criticality import tag_criticality
 from allocator.allocate import allocate
+from channel.packet_adapter import allocator_output_to_packet
 from channel.simulator import send, send_raw_audio
 from tts.tts import synthesize
 
@@ -41,19 +44,6 @@ class RunRequest(BaseModel):
     mode: str = "itantra"  # "itantra" or "baseline"
 
 
-class RunResponse(BaseModel):
-    language: str
-    text: str
-    confidence_per_token: list[float]
-    criticality_per_token: list[float]
-    protection_per_token: list[float]
-    raw_audio_bytes: int
-    packet_bytes: int
-    mode: str
-    audio_base64: str | None = None   # base64-encoded audio for playback in the UI
-    audio_format: str = "wav"         # tell the frontend how to decode/play it
-
-
 def _encode_audio(audio_bytes: bytes | None) -> str | None:
     """Turns raw audio bytes into a base64 string the frontend can play directly.
     Returns None if there's no audio yet (e.g. stubs still returning empty bytes)."""
@@ -67,7 +57,7 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/run_pipeline", response_model=RunResponse)
+@app.post("/run_pipeline", response_model=RunPipelineResponse)
 def run_pipeline(req: RunRequest):
     # STUB — audio_chunk decoding not yet wired.
     audio_chunk = None
@@ -84,14 +74,27 @@ def run_pipeline(req: RunRequest):
         audio_out = degraded_audio
         raw_bytes = len(degraded_audio) if degraded_audio else 0
     else:
-        packet = allocate(text, confidence, criticality, req.bitrate_kbps)
-        received = send(packet, req.bitrate_kbps, req.noise_level)
-        protection = received["protection_per_token"]
-        packet_bytes = len(str(received))  # placeholder size metric — refine later
-        audio_out = synthesize(text=" ".join(received["tokens"]))
+        allocator_output = allocate(
+            text,
+            confidence,
+            criticality,
+            req.bitrate_kbps,
+        )
+
+        packet = allocator_output_to_packet(allocator_output)
+
+        received = send(
+            packet,
+            req.bitrate_kbps,
+            req.noise_level,
+        )
+
+        protection = received.protection_per_token
+        packet_bytes = len(str(received.to_dict()))  # placeholder size metric — refine later
+        audio_out = synthesize(text=" ".join(received.tokens))
         raw_bytes = 0
 
-    return RunResponse(
+    return RunPipelineResponse(
         language=language,
         text=text,
         confidence_per_token=confidence,
@@ -108,3 +111,4 @@ def run_pipeline(req: RunRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
