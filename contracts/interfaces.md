@@ -92,10 +92,25 @@ this shared `Packet`, not a raw dict.
   for the "before" baseline demo — it does not go through the Packet format at all.
 
 **TTS contract (receiver side):**
-- Input: `text: str`, `speaker_embedding: object | None`, `prosody_vector: object | None`
-- Output: `audio` — raw bytes (WAV), owner of `tts/` decides internal format but must
-  document it here once fixed (currently: WAV bytes).
+- `tts/tts.py` exposes a class, not a bare function:
+```python
+  class TTSWrapper:
+      def synthesize(self, text: str, language: str, speaker_wav: str,
+                      out_path: str = None, deterministic: bool = True) -> str:
+          """
+          language: 'en' or 'hi' — matches the language field from SttOutput.
+          speaker_wav: path to a 6-10s clean mono reference clip. XTTS computes
+                       the speaker embedding internally from this clip; no
+                       separate speaker_embedding/prosody_vector input exists.
+          Returns: path to the synthesized .wav file.
+          """
 
+      def to_packet_format(self, wav_path: str) -> dict:
+          """Returns {"audio_base64": str, "audio_format": "wav",
+          "sample_rate": int, "duration_sec": float} for the Backend bridge."""
+```
+- Callers: `TTSWrapper().synthesize(...)` then `.to_packet_format(...)` —
+  not a bare `synthesize()` function.
 ---
 
 ## 4. Backend (FastAPI) → UI (React)
@@ -136,3 +151,4 @@ who to ask about it.
 | Day 2 | Allocator contract: `language` made a required input; criticality tagging moved inside the allocator | Allocator/Channel Lead | Supports the bilingual `"en"` / `"hi"` pipeline and keeps the tagger as an internal allocator component rather than a separate pipeline boundary |
 | Day 2 | Channel degradation: `send()` now uses `protection_per_token` when determining token corruption | Channel/Systems Lead | Implements protection-aware degradation so highly protected tokens are more resilient to channel noise |
 | Day 2 | STT: `transcribe()` now returns averaged confidence (float) instead of per-token list; use `get_stt_output()` for pipeline integration instead | STT Lead | `transcribe()` was simplified for standalone CLI use; `get_stt_output()` remains contract-compliant |
+| Day 2 | TTS contract: replaced planned `synthesize(text, speaker_embedding, prosody_vector)` with `TTSWrapper.synthesize(text, language, speaker_wav, out_path, deterministic)` | TTS Lead | XTTS v2 computes the speaker embedding internally from a reference clip — no separate embedding/prosody_vector exists to pass in. Backend must call the class method + `to_packet_format()`, not a bare function. |
