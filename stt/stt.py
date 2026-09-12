@@ -90,12 +90,18 @@ def _collect_tokens(segments) -> Tuple[List[str], List[float]]:
                 tokens.append(token)
                 confidences.append(float(word.probability))
         else:
-            # Fallback when word timestamps are unavailable.
-            words = segment.text.strip().split()
+           # Fallback when word timestamps are unavailable.
+           # avg_logprob is a log-probability (often negative, unbounded) — not a
+           # [0,1] confidence score. Convert it to a rough 0-1 estimate so it never
+           # violates the STT->Allocator contract's confidence range.
+           words = segment.text.strip().split()
+           # exp() maps log-probability back to a genuine 0-1 probability-like value.
+           import math
+           estimated_confidence = max(0.0, min(1.0, math.exp(segment.avg_logprob)))
 
-            for word in words:
-                tokens.append(word)
-                confidences.append(float(segment.avg_logprob))
+           for word in words:
+            tokens.append(word)
+            confidences.append(estimated_confidence)
 
     return tokens, confidences
 
