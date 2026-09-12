@@ -62,7 +62,7 @@ function SecHead({ led, children }) {
   );
 }
 
-function LiveView({ mode, setMode, noise, setNoise }) {
+function LiveView({ mode, setMode, noise, setNoise, bitrate, setBitrate }) {
   const TRANSCRIPT = [
     { w:"send",      pct:25, ok:false },
     { w:"backup",   pct:75, ok:true  }, // (agar comma ya spelling wahi hai toh check kar lena)
@@ -115,10 +115,22 @@ function LiveView({ mode, setMode, noise, setNoise }) {
             </div>
           </div>
 
-          <div className="flex flex-col items-center gap-1 px-4 py-1" style={{ borderLeft:"1px solid var(--border)", borderRight:"1px solid var(--border)" }}>
-            <Lbl>Bitrate</Lbl>
-            <span className="mono font-bold gc" style={{ fontSize:18 }}>3.5</span>
-            <span className="lbl" style={{ fontSize:8 }}>kbps</span>
+                   <div className="flex flex-col gap-1 px-4 py-1" style={{ borderLeft:"1px solid var(--border)", borderRight:"1px solid var(--border)", minWidth:140 }}>
+            <div className="flex justify-between items-center">
+              <Lbl>Bitrate</Lbl>
+              <span className="mono font-bold gc" style={{ fontSize:14 }}>
+                {bitrate.toFixed(1)}<span className="lbl ml-0.5" style={{ fontSize:8 }}>kbps</span>
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0.5}
+              max={20}
+              step={0.1}
+              value={bitrate}
+              onChange={e => setBitrate(+e.target.value)}
+              className="slider w-full mt-1"
+            />
           </div>
 
           <div className="flex flex-col gap-1 flex-1 min-w-[200px] px-2">
@@ -285,6 +297,7 @@ export default function App() {
   const [tab, setTab] = useState("live");
   const [mode, setMode] = useState("itantra");
   const [noise, setNoise] = useState(65);
+   const [bitrate, setBitrate] = useState(3.5);
 
   return (
     <div className="flex flex-col h-screen select-none" style={{ background: "var(--bg)", color: "var(--text)", fontFamily: "JetBrains Mono, monospace" }}>
@@ -293,7 +306,7 @@ export default function App() {
       {/* Main Container with Sidebar Layout */}
       <main className="flex-1 flex overflow-hidden relative p-3 gap-3">
         <div className="flex-1 flex flex-col overflow-hidden">
-          {tab === "live" && <LiveView mode={mode} setMode={setMode} noise={noise} setNoise={setNoise} />}
+         {tab === "live" && <LiveView mode={mode} setMode={setMode} noise={noise} setNoise={setNoise} bitrate={bitrate} setBitrate={setBitrate} />}
           {tab === "analytics" && <AnalyticsView />}
         </div>
         
