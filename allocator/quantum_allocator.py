@@ -9,6 +9,41 @@ from typing import List, Optional
 from channel.packet import Packet
 from allocator.allocator import BandwidthAllocator
 
+
+def calculate_priority(
+    confidence: List[float],
+    criticality: List[float],
+    priority_mode: str = "weighted_sum",
+) -> List[float]:
+    """
+    Shared priority formula, exported at module level so any script
+    that needs to score/compare allocator output (e.g. the benchmark)
+    uses the exact same formula the allocators optimize for, instead
+    of a second hardcoded copy that can silently drift out of sync.
+
+    'weighted_sum' matches allocate_greedy(): 0.5*criticality +
+    0.5*(1-confidence). 'product' reproduces the original
+    criticality*(1-confidence) formula.
+    """
+
+    if priority_mode not in {"weighted_sum", "product"}:
+        raise ValueError(
+            f"priority_mode must be 'weighted_sum' or 'product', "
+            f"got {priority_mode!r}"
+        )
+
+    if priority_mode == "product":
+        return [
+            criticality[i] * (1.0 - confidence[i])
+            for i in range(len(confidence))
+        ]
+
+    return [
+        0.5 * criticality[i] + 0.5 * (1.0 - confidence[i])
+        for i in range(len(confidence))
+    ]
+
+
 class QuantumAllocator(BandwidthAllocator):
 
     def __init__(
@@ -78,9 +113,9 @@ class QuantumAllocator(BandwidthAllocator):
         if not isinstance(criticality, list):
             raise TypeError("criticality must be a list")
 
-        if language not in {"en", "hi"}:
+        if language not in {"en", "hi", "mixed"}:
             raise ValueError(
-                f"language must be 'en' or 'hi', got {language!r}"
+                f"language must be 'en', 'hi', or 'mixed', got {language!r}"
             )
 
         if channel_bitrate_kbps < 0:
@@ -185,18 +220,13 @@ class QuantumAllocator(BandwidthAllocator):
 
         'product' reproduces the original criticality*(1-confidence)
         formula, kept for backward compatibility / A-B comparison.
+
+        Delegates to the module-level calculate_priority() so this
+        class and any external script (e.g. the benchmark) can never
+        compute priority two different ways by accident.
         """
 
-        if self.priority_mode == "product":
-            return [
-                criticality[i] * (1.0 - confidence[i])
-                for i in range(len(confidence))
-            ]
-
-        return [
-            0.5 * criticality[i] + 0.5 * (1.0 - confidence[i])
-            for i in range(len(confidence))
-        ]
+        return calculate_priority(confidence, criticality, self.priority_mode)
 
     def _calculate_max_slots(
         self,
