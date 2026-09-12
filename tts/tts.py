@@ -59,6 +59,19 @@ in the previous version. This pass:
           bake_demo_fallback()'s output is intentionally kept in
           demo_fallback/ (not temp) since that's a real deliverable asset.
 
+  [FIX 28] Added synthesize_auto() — a convenience entry point that routes
+          to synthesize() or synthesize_mixed() based on whether the input
+          text actually contains mixed scripts (Devanagari + Latin). This
+          does NOT change the STT->TTS contract: input/output shapes match
+          synthesize()'s exactly. synthesize() and synthesize_mixed() still
+          exist unchanged for callers that want explicit control — this is
+          an additional convenience method, not a replacement. Rationale:
+          the Backend Lead shouldn't need to detect code-switching or know
+          this distinction exists; the detection logic (_split_by_language,
+          via Devanagari-vs-Latin script checks) already lives in this
+          file, so there's no reason to push that decision upstream or add
+          a contract field for it.
+
 Known, accepted caveat (documented, not hidden):
   check_prosody() is a CHEAP heuristic (pitch/energy variance), not a
   perceptual quality score. It does NOT prove the cloned voice matches the
@@ -573,6 +586,39 @@ class TTSWrapper:
         return out_path
 
     # ------------------------------------------------------------------
+    # [FIX 28] Auto-routing convenience entry point
+    # ------------------------------------------------------------------
+    def synthesize_auto(self, text: str, speaker_wav: str, language_hint: str = "en",
+                         out_path: str = None, deterministic: bool = True) -> str:
+        """
+        Routes to synthesize() or synthesize_mixed() based on whether the
+        text actually contains mixed scripts, so callers (Backend Lead)
+        don't need to detect code-switching themselves or know this
+        distinction exists.
+
+        This does NOT change the STT->TTS contract: input/output shapes are
+        identical to synthesize()'s. It's an additional convenience method,
+        not a replacement — synthesize() and synthesize_mixed() still exist
+        and still work exactly as before for callers that want explicit
+        control.
+
+        language_hint: used only when the text is single-script AND that
+        script is Latin (ambiguous between English and romanized Hindi) —
+        defaults to 'en'. Devanagari-only text is always routed to 'hi'
+        regardless of this hint.
+        """
+        has_devanagari = bool(_DEVANAGARI_RE.search(text))
+        has_latin = bool(re.search(r"[a-zA-Z]", text))
+
+        if has_devanagari and has_latin:
+            return self.synthesize_mixed(text, speaker_wav, out_path=out_path,
+                                          deterministic=deterministic)
+        else:
+            lang = "hi" if has_devanagari else language_hint
+            return self.synthesize(text, lang, speaker_wav, out_path=out_path,
+                                    deterministic=deterministic)
+
+    # ------------------------------------------------------------------
     # Text-normalization check for USP-critical content
     # ------------------------------------------------------------------
     def compare_numeral_forms(self, digit_form: str, spelled_form: str, language: str,
@@ -741,6 +787,27 @@ if __name__ == "__main__":
               f"language-switch boundaries specifically before trusting this.")
     except Exception as e:
         print(f"[WARN] Hinglish synthesis failed: {e}")
+
+    # [FIX 28] Auto-routing test — should transparently choose the right
+    # path for a plain-English sentence, a plain-Hindi sentence, and a
+    # mixed sentence, without the caller specifying which.
+    try:
+        auto_en = wrapper.synthesize_auto(
+            "We need help at grid reference two eight point five north.",
+            speaker_wav=reference_clips["en"],
+        )
+        auto_hi = wrapper.synthesize_auto(
+            "हमें मदद चाहिए।",
+            speaker_wav=reference_clips["hi"],
+        )
+        auto_mixed = wrapper.synthesize_auto(
+            "Team Alpha यहाँ है। We need मदद at grid reference two eight point five.",
+            speaker_wav=reference_clips["en"],
+        )
+        print(f"[TTS] synthesize_auto results -> en: {auto_en}, hi: {auto_hi}, "
+              f"mixed: {auto_mixed}")
+    except Exception as e:
+        print(f"[WARN] synthesize_auto test failed: {e}")
 
     try:
         numeral_check = wrapper.compare_numeral_forms(
