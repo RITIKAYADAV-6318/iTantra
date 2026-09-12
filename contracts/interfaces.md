@@ -21,6 +21,11 @@ This file is the plain-English version. `contracts/schemas.py` is the enforced v
 | `tokens` | `list[str]` | tokenized form of `text`; used to align confidence values |
 | `confidence_per_token` | `list[float]` | one score `[0,1]` per token, **same length as `tokens`** |
 
+> **Note (Day 2):** call `get_stt_output()` for pipeline integration — it returns
+> the full per-token `SttOutput` contract. `transcribe()` is a simpler helper that
+> now returns an averaged confidence float (not a per-token list) and must not be
+> used to feed the allocator.
+
 **Allocator input boundary:**
 
 ```text
@@ -130,3 +135,4 @@ who to ask about it.
 | Day 1 | Channel contract: allocator bitrate renamed to `allocated_for_bitrate_kbps`; `language` added to Packet; channel `send()` now takes/returns `Packet` with current `bitrate_kbps` passed separately | Channel/Systems Lead | Removes ambiguity between allocator bitrate assumptions and current channel bitrate, and makes the Packet/Channel boundary consistent |
 | Day 2 | Allocator contract: `language` made a required input; criticality tagging moved inside the allocator | Allocator/Channel Lead | Supports the bilingual `"en"` / `"hi"` pipeline and keeps the tagger as an internal allocator component rather than a separate pipeline boundary |
 | Day 2 | Channel degradation: `send()` now uses `protection_per_token` when determining token corruption | Channel/Systems Lead | Implements protection-aware degradation so highly protected tokens are more resilient to channel noise |
+| Day 2 | STT: `transcribe()` now returns averaged confidence (float) instead of per-token list; use `get_stt_output()` for pipeline integration instead | STT Lead | `transcribe()` was simplified for standalone CLI use; `get_stt_output()` remains contract-compliant |
