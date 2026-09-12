@@ -105,6 +105,40 @@ def _collect_tokens(segments) -> Tuple[List[str], List[float]]:
 
     return tokens, confidences
 
+def _normalize_tokens_and_confidences(
+    tokens: List[str],
+    confidences: List[float],
+) -> Tuple[List[str], List[float]]:
+
+    merged_tokens = []
+    merged_confidences = []
+
+    i = 0
+
+    while i < len(tokens):
+        token = tokens[i]
+
+        if (
+            i + 1 < len(tokens)
+            and token.isdigit()
+            and tokens[i + 1].startswith(".")
+            and tokens[i + 1][1:].isdigit()
+        ):
+            merged_tokens.append(token + tokens[i + 1])
+
+            merged_confidences.append(
+                min(confidences[i], confidences[i + 1])
+            )
+
+            i += 2
+            continue
+
+        merged_tokens.append(token)
+        merged_confidences.append(confidences[i])
+
+        i += 1
+
+    return merged_tokens, merged_confidences
 
 # ---------------------------------------------------------------------
 # STT
@@ -153,14 +187,17 @@ def transcribe(
 
     segments = list(segments)
 
-    text = _clean_text(
-        " ".join(segment.text for segment in segments)
+    tokens, confidences = _collect_tokens(segments)
+
+    tokens, confidences = _normalize_tokens_and_confidences(
+        tokens,
+        confidences,
     )
+
+    text = " ".join(tokens)
 
     if not text:
         return "", 0.0
-
-    _, confidences = _collect_tokens(segments)
 
     confidence = (
         sum(confidences) / len(confidences)
@@ -228,6 +265,13 @@ def get_stt_output(
     )
 
     tokens, confidences = _collect_tokens(segments)
+
+    tokens, confidences = _normalize_tokens_and_confidences(
+        tokens,
+        confidences,
+    )
+
+    text = " ".join(tokens)
 
     detected_language = getattr(info, "language", "en")
     output_language = _script_language_label(

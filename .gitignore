@@ -16,3 +16,11 @@ ui/frontend/dist/
 ui/frontend/.vite/
 
 venv/
+
+# Audio/test artifacts
+*.ogg
+*.flac
+*.m4a
+
+# Generated project artifacts
+artifacts/

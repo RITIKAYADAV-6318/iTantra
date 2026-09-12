@@ -178,7 +178,7 @@ def test_allocator_packet_validates_with_allocator_schema():
         language=packet.language,
         speaker_embedding=packet.speaker_embedding,
         prosody_vector=packet.prosody_vector,
-        sound_event_tag=packet.sound_event_tag,
+        sound_event_tags=packet.sound_event_tags,
     )
 
     assert validated.language == "en"
@@ -192,6 +192,7 @@ def test_channel_matches_contract():
         protection_per_token=[0.2, 0.9, 1.0],
         allocated_for_bitrate_kbps=2.0,
         language="en",
+        sound_event_tags=["siren", "gunfire"],
     )
 
     received = send(
@@ -207,6 +208,7 @@ def test_channel_matches_contract():
     assert len(received.protection_per_token) == len(packet.protection_per_token)
 
     assert received.language == packet.language
+    assert received.sound_event_tags == packet.sound_event_tags
 
     assert (
         received.allocated_for_bitrate_kbps
@@ -229,13 +231,14 @@ def test_backend_response_matches_contract():
         "mode": "itantra",
         "audio_base64": None,
         "audio_format": "wav",
+        "sound_event_tags": ["siren", "gunfire"],
     }
 
     response = RunPipelineResponse(**example)
 
     assert response.language == "en"
     assert response.mode == "itantra"
-
+    assert response.sound_event_tags == ["siren", "gunfire"]
 
 if __name__ == "__main__":
     test_stt_output_matches_contract()

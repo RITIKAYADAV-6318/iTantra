@@ -9,7 +9,7 @@ TEST_CASES = [
     }
 ]
 
-from stt import get_stt_output
+from stt.stt import get_stt_output
 
 passed = 0
 

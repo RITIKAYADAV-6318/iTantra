@@ -82,6 +82,10 @@ Fine for an SIH demo — flag on the roadmap slide, don't claim
 production-ready.
 """
 
+from utils.ffmpeg_setup import setup_ffmpeg_dlls
+
+setup_ffmpeg_dlls()
+
 import os
 
 os.environ.setdefault("COQUI_TOS_AGREED", "1")

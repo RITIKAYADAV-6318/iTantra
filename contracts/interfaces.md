@@ -68,8 +68,7 @@ STT audio, timestamps, and other internal STT details do not cross this boundary
 | `language` | `str` | language passed through from STT, e.g. `"hi"`, `"en"` |
 | `speaker_embedding` | `object \| None` | optional, from TTS module's extractor |
 | `prosody_vector` | `object \| None` | optional |
-| `sound_event_tag` | `str \| None` | optional, e.g. `"[siren]"` |
-
+| `sound_event_tags` | `list[str]` | optional list of detected environmental sound events, e.g. `["siren", "gunfire"]` |
 This is exactly the `Packet` dataclass in `channel/packet.py` — the allocator returns
 this shared `Packet`, not a raw dict.
 
@@ -152,3 +151,4 @@ who to ask about it.
 | Day 2 | Channel degradation: `send()` now uses `protection_per_token` when determining token corruption | Channel/Systems Lead | Implements protection-aware degradation so highly protected tokens are more resilient to channel noise |
 | Day 2 | STT: `transcribe()` now returns averaged confidence (float) instead of per-token list; use `get_stt_output()` for pipeline integration instead | STT Lead | `transcribe()` was simplified for standalone CLI use; `get_stt_output()` remains contract-compliant |
 | Day 2 | TTS contract: replaced planned `synthesize(text, speaker_embedding, prosody_vector)` with `TTSWrapper.synthesize(text, language, speaker_wav, out_path, deterministic)` | TTS Lead | XTTS v2 computes the speaker embedding internally from a reference clip — no separate embedding/prosody_vector exists to pass in. Backend must call the class method + `to_packet_format()`, not a bare function. |
+| Day 3 | Sound-event metadata: `sound_event_tag` changed to `sound_event_tags` (`list[str]`) | Channel/Systems Lead | Supports simultaneous environmental sound events in mixed audio while keeping event metadata separate from speech text |
