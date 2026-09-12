@@ -2,8 +2,9 @@
 numpy
 librosa
 faster-whisper
-TTS
+coqui-tts==0.27.5
 fastapi
 uvicorn[standard]
 pydantic
-streamlit  # kept only for ui/streamlit_fallback — not the primary dashboard
+streamlit  # kept only for ui/streamlit_fallback - not the primary dashboard
+soundfile==0.14.0
