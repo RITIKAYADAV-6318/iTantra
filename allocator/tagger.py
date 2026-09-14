@@ -52,6 +52,14 @@ def _get_nlp_en():
 # PATTERNS
 # ============================================================
 COORD_PATTERN = re.compile(r"^\d+(?:\.\d+)?[NSWE]$", re.IGNORECASE)
+
+# FIX: real spoken demo sentences say the direction as a separate word
+# ("eight point five north"), not glued to the number ("28.5N"). The
+# pattern above only catches the glued written form — this catches the
+# spoken two-token form so the SAME coordinate gets the SAME top-tier
+# protection regardless of how it was actually said.
+DIRECTION_WORDS = {"north", "south", "east", "west"}
+
 LOCATION_CODE_PATTERN = re.compile(r"^(?:NH|SH|AH|MH|CH)-?\d+$", re.IGNORECASE)
 NUMBER_PATTERN = re.compile(r"^\d+(?:\.\d+)?$")
 
@@ -112,6 +120,26 @@ def find_spoken_callsign_spans(doc):
                 span_indices.add(tokens[i].i)
                 i = j
                 continue
+        i += 1
+    return span_indices
+
+def find_spoken_coordinate_spans(doc):
+    """
+    Spoken-form coordinate detector: a number immediately followed by a
+    direction word ("8.5 north") is a coordinate, same criticality tier
+    as the glued written form ("8.5N"). Symmetric to
+    find_spoken_callsign_spans above — same reasoning, different pattern.
+    """
+    span_indices = set()
+    tokens = list(doc)
+    i = 0
+    while i < len(tokens) - 1:
+        current = tokens[i].text
+        next_word = tokens[i + 1].text.lower()
+        looks_like_number = bool(NUMBER_PATTERN.fullmatch(current))
+        if looks_like_number and next_word in DIRECTION_WORDS:
+            span_indices.add(tokens[i].i)
+            span_indices.add(tokens[i + 1].i)
         i += 1
     return span_indices
 
@@ -258,6 +286,7 @@ def _tag_english(text: str) -> list:
     doc = _get_nlp_en()(text)
     negated_targets = find_negation_map(doc)
     spoken_callsign_spans = find_spoken_callsign_spans(doc)
+    spoken_coordinate_spans = find_spoken_coordinate_spans(doc)
     results = []
 
     for token in doc:
@@ -278,7 +307,9 @@ def _tag_english(text: str) -> list:
             or lower_word == "never"
         )
 
-        if token.i in spoken_callsign_spans:
+        if token.i in spoken_coordinate_spans:
+            score, tag = 1.0, "COORDINATE"
+        elif token.i in spoken_callsign_spans:
             score, tag = 0.90, "CALLSIGN"
         elif special:
             score, tag = special

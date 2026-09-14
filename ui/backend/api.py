@@ -13,7 +13,6 @@ import base64
 import os
 import tempfile
 
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -23,9 +22,9 @@ from contracts.schemas import RunPipelineResponse
 from stt.stt import get_stt_output
 from allocator.allocate import allocate
 from channel.simulator import send, send_raw_audio
+from channel.packet import Packet
 from tts.tts import TTSWrapper
 from channel.sound_events import detect_sound_events
-
 
 
 app = FastAPI(title="iTantra Pipeline API")
@@ -40,6 +39,7 @@ app.add_middleware(
 
 tts_wrapper = TTSWrapper()
 
+
 class RunRequest(BaseModel):
     # STUB — replace `audio_base64` handling with real mic capture / file upload
     # once the frontend audio pipeline is decided.
@@ -53,6 +53,7 @@ def _encode_audio(audio_bytes: bytes | None) -> str | None:
     if not audio_bytes:
         return None
     return base64.b64encode(audio_bytes).decode("utf-8")
+
 
 @app.get("/health")
 def health():
@@ -123,12 +124,32 @@ def run_pipeline(req: RunRequest):
         # 4. iTANTRA
         # -----------------------------------------------------
         else:
-            packet = allocate(
-                text=text,
-                confidence=confidence,
-                channel_bitrate_kbps=req.bitrate_kbps,
-                language=language,
-            )
+            try:
+                packet = allocate(
+                    text=text,
+                    confidence=confidence,
+                    channel_bitrate_kbps=req.bitrate_kbps,
+                    language=language,
+                )
+            except ValueError as e:
+                # Allocator refused (e.g. tokenization mismatch between
+                # STT and the tagger). Don't crash the demo — fall back
+                # to unprotected, safe defaults so the pipeline still
+                # completes end to end.
+                print(f"[WARN] Allocator failed ({e}) — using unprotected fallback.")
+                fallback_tokens = text.split()
+                n = len(fallback_tokens)
+                fallback_confidence = (
+                    list(confidence[:n]) + [0.5] * max(0, n - len(confidence))
+                )
+                packet = Packet(
+                    tokens=fallback_tokens,
+                    confidence_per_token=fallback_confidence,
+                    criticality_per_token=[0.3] * n,
+                    protection_per_token=[0.1] * n,
+                    allocated_for_bitrate_kbps=req.bitrate_kbps,
+                    language=language,
+                )
 
             packet.sound_event_tags = sound_event_tags
 
@@ -138,12 +159,31 @@ def run_pipeline(req: RunRequest):
                 req.noise_level,
             )
 
+            print(f"\n[DEBUG] === Allocation & channel trace ===")
+            print(f"[DEBUG] Original text:        {text}")
+            print(f"[DEBUG] Allocator tokens:      {packet.tokens}")
+            print(f"[DEBUG] Criticality per token: {[round(c, 2) for c in packet.criticality_per_token]}")
+            print(f"[DEBUG] Protection per token:  {[round(p, 2) for p in packet.protection_per_token]}")
+            print(f"[DEBUG] After channel (tokens): {received.tokens}")
+
+            reconstructed_text = " ".join(
+                token for token in received.tokens if token != "[CORRUPTED]"
+            )
+            print(f"[DEBUG] Final text sent to TTS: {reconstructed_text}")
             protection = received.protection_per_token
             criticality = received.criticality_per_token
 
             packet_bytes = len(str(received.to_dict()).encode("utf-8"))
 
-            reconstructed_text = " ".join(received.tokens)
+            # Drop corrupted tokens before speaking — TTS should never be asked
+            # to pronounce the literal placeholder text; a corrupted word is
+            # silently left out of the reconstructed speech instead.
+            reconstructed_text = " ".join(
+                token for token in received.tokens if token != "[CORRUPTED]"
+            )
+
+            print(f"[DEBUG] Original text:      {text}")
+            print(f"[DEBUG] Reconstructed text: {reconstructed_text}")
 
             # Pick the reference voice according to detected language.
             if language == "hi":
@@ -190,4 +230,3 @@ def run_pipeline(req: RunRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

@@ -8,3 +8,4 @@ uvicorn[standard]
 pydantic
 streamlit  # kept only for ui/streamlit_fallback - not the primary dashboard
 soundfile==0.14.0
+spacy

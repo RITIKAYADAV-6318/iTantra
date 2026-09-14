@@ -39,6 +39,21 @@ EVENT_THRESHOLDS = {
 }
 
 # ---------------------------------------------------------------------
+# Windowing configuration — implementation parameters, not requirements.
+# ---------------------------------------------------------------------
+#
+# AST classifies a clip via global pooling over the whole spectrogram. Fed
+# the whole file at once, a short, transient event (a gunshot burst) gets
+# acoustically diluted by a longer, louder, continuous event (a siren)
+# playing over the same clip — so its score can fall below threshold even
+# though the sound is clearly present. Classifying in short overlapping
+# windows and taking the union of detected events fixes this without
+# needing per-event threshold hacks.
+#
+CHUNK_SECONDS = 2.0
+CHUNK_OVERLAP = 0.5  # fraction of chunk length
+
+# ---------------------------------------------------------------------
 # Project event vocabulary
 # ---------------------------------------------------------------------
 #
@@ -155,6 +170,28 @@ def _load_audio(audio_path: str | Path) -> tuple[np.ndarray, int]:
     return audio.astype(np.float32), sample_rate
 
 
+def _chunk_audio(audio: np.ndarray, sample_rate: int) -> List[np.ndarray]:
+    """
+    Split audio into overlapping windows so short, transient events (like a
+    gunshot burst) aren't acoustically diluted by longer, dominant sounds
+    (like a continuous siren) when classified as one whole clip.
+    """
+    chunk_len = int(CHUNK_SECONDS * sample_rate)
+    hop = max(1, int(chunk_len * (1 - CHUNK_OVERLAP)))
+
+    if len(audio) <= chunk_len:
+        return [audio]  # short clip — no need to window it
+
+    chunks = []
+    start = 0
+    while start < len(audio):
+        chunk = audio[start:start + chunk_len]
+        if len(chunk) >= sample_rate * 0.5:  # skip tiny trailing slivers
+            chunks.append(chunk)
+        start += hop
+    return chunks
+
+
 # ---------------------------------------------------------------------
 # Event mapping
 # ---------------------------------------------------------------------
@@ -199,6 +236,11 @@ def detect_sound_events(
     """
     Detect one or more environmental sound events.
 
+    Classifies audio in short overlapping windows (see _chunk_audio) rather
+    than the whole clip at once — a short transient event like a gunshot
+    would otherwise get acoustically diluted by a longer, louder event like
+    a continuous siren when both are classified together as one clip.
+
     Args:
         audio_path:
             Path to the input audio file.
@@ -228,16 +270,17 @@ def detect_sound_events(
         raise ValueError("threshold must be between 0.0 and 1.0")
 
     audio, sample_rate = _load_audio(audio_path)
-
     classifier = _get_classifier()
 
-    predictions = classifier(
-        {
-            "array": audio,
-            "sampling_rate": sample_rate,
-        },
-        top_k=None,
-        function_to_apply="sigmoid",
-    )
+    detected: List[str] = []
+    for chunk in _chunk_audio(audio, sample_rate):
+        predictions = classifier(
+            {"array": chunk, "sampling_rate": sample_rate},
+            top_k=None,
+            function_to_apply="sigmoid",
+        )
+        for event in _map_predictions(predictions, threshold):
+            if event not in detected:
+                detected.append(event)
 
-    return _map_predictions(predictions, threshold)
+    return detected
