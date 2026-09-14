@@ -24,7 +24,7 @@ class Packet:
 
     speaker_embedding: Optional[object] = None
     prosody_vector: Optional[object] = None
-    sound_event_tag: Optional[str] = None
+    sound_event_tags: List[str] = field(default_factory=list)
 
     def to_dict(self):
         return self.__dict__

@@ -10,7 +10,7 @@ commit.
 """
 
 from typing import List, Optional
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class SttOutput(BaseModel):
@@ -42,10 +42,11 @@ class AllocatorOutput(BaseModel):
     allocated_for_bitrate_kbps: float
 
     # Passed through from STT so language is not lost.
-    language: str = "en"
+    # Required because the allocator must never silently assume English.
+    language: str
     speaker_embedding: Optional[object] = None
     prosody_vector: Optional[object] = None
-    sound_event_tag: Optional[str] = None
+    sound_event_tags: List[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def check_lengths_match(self):
@@ -69,6 +70,7 @@ class RunPipelineResponse(BaseModel):
     mode: str
     audio_base64: Optional[str] = None
     audio_format: str = "wav"
+    sound_event_tags: List[str] = Field(default_factory=list)
 
 
 if __name__ == "__main__":
