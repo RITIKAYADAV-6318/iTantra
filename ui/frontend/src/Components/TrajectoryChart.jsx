@@ -29,7 +29,7 @@ export default function TrajectoryChart({ data }) {
   return (
     <div className="card relative p-4" style={{ borderRadius:2 }}>
       <Corner />
-      <SecHead led="c">SNR Comparison — iTantra vs Baseline (0s – 40s)</SecHead>
+     <SecHead led="c">Transmission Quality — iTantra vs Baseline</SecHead>
       <ResponsiveContainer width="100%" height={160}>
         <AreaChart data={data} margin={{ top:4, right:12, left:0, bottom:0 }}>
           <defs>

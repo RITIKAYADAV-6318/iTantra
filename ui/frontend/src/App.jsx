@@ -28,11 +28,20 @@ function Lbl({ children }) {
 
 const FREQ_LABELS = ["63Hz","125","250","500","1k","2k","3k","4k","5k","6k","8k","10k","12k","14k","16k","20k"];
 
-const SNR_DATA = Array.from({ length: 21 }, (_, i) => ({
-  t: `${i*2}s`,
-  itantra: 24 + Math.sin(i*0.6)*3.5 + Math.random()*1.5,
-  baseline: 9 + Math.sin(i*0.4)*2 + Math.random()*1.2,
-}));
+const SNR_DATA = (pipelineResult) => {
+  const confidence = pipelineResult?.confidence_per_token || [];
+  const protection = pipelineResult?.protection_per_token || [];
+
+  const length = Math.max(confidence.length, protection.length);
+
+  if (!length) return [];
+
+  return Array.from({ length }, (_, i) => ({
+    t: `${i + 1}`,
+    itantra: Math.round((protection[i] ?? 0) * 100),
+    baseline: Math.round((confidence[i] ?? 0) * 100),
+  }));
+};
 
 const EVENTS = [
   { ts:"14:32:35", type:"WARNING",   color:"var(--amber)", msg:"Latency spike detected: 4.1 ms" },
@@ -62,18 +71,73 @@ function SecHead({ led, children }) {
   );
 }
 
-function LiveView({ mode, setMode, noise, setNoise, bitrate, setBitrate }) {
-  const TRANSCRIPT = [
-    { w:"send",      pct:25, ok:false },
-    { w:"backup",   pct:75, ok:true  }, // (agar comma ya spelling wahi hai toh check kar lena)
-    { w:"to",        pct:30, ok:false },
-    { w:"grid",      pct:80, ok:true  },
-    { w:"reference", pct:45, ok:false },
-    { w:"four",      pct:95, ok:true  },
-    { w:"seven",     pct:92, ok:true  },
-    { w:"two",       pct:94, ok:true  },
-    { w:"nine",      pct:93, ok:true  },
-  ];
+function LiveView({
+  mode,
+  setMode,
+  noise,
+  setNoise,
+  bitrate,
+  setBitrate,
+  selectedFile,
+  setSelectedFile,
+  pipelineLoading,
+  setPipelineLoading,
+  pipelineResult,
+  setPipelineResult,
+}) 
+
+{
+  const runUploadedAudio = async (file) => {
+    try {
+      setPipelineLoading(true);
+      setPipelineResult(null);
+
+      const buffer = await file.arrayBuffer();
+
+      let binary = "";
+      const bytes = new Uint8Array(buffer);
+
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+
+      const audioBase64 = btoa(binary);
+
+      const response = await fetch("http://localhost:8000/run_pipeline", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          audio_base64: audioBase64,
+          bitrate_kbps: bitrate,
+          noise_level: noise,
+          mode: mode,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Backend error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      setPipelineResult(result);
+    } catch (error) {
+      console.error("Pipeline error:", error);
+      alert("Audio processing failed. Check that the backend is running.");
+    } finally {
+      setPipelineLoading(false);
+    }
+  };
+
+
+ const transcriptWords = pipelineResult?.text
+  ? pipelineResult.text.split(" ").map((word, index) => ({
+      w: word,
+      pct: Math.round((pipelineResult?.confidence_per_token?.[index] ?? 0) * 100),
+     ok: (pipelineResult?.protection_per_token?.[index] ?? 0) >= 0.7,
+    }))
+  : [];
 
   return (
     <div className="flex flex-col gap-3 overflow-auto flex-1" style={{ padding:"12px 16px" }}>
@@ -122,28 +186,31 @@ function LiveView({ mode, setMode, noise, setNoise, bitrate, setBitrate }) {
                 {bitrate.toFixed(1)}<span className="lbl ml-0.5" style={{ fontSize:8 }}>kbps</span>
               </span>
             </div>
-            <input
-              type="range"
-              min={0.5}
-              max={20}
-              step={0.1}
-              value={bitrate}
-              onChange={e => setBitrate(+e.target.value)}
-              className="slider w-full mt-1"
-            />
+          
           </div>
 
           <div className="flex flex-col gap-1 flex-1 min-w-[200px] px-2">
             <div className="flex justify-between items-center">
               <Lbl>AWGN Noise Level</Lbl>
-              <span className="mono font-bold ga" style={{ fontSize:14 }}>{noise}<span className="lbl ml-0.5" style={{fontSize:8}}>%</span></span>
+             <span className="mono font-bold ga" style={{ fontSize:14 }}>
+  {(noise * 100).toFixed(0)}
+  <span className="lbl ml-0.5" style={{fontSize:8}}>%</span>
+</span>
             </div>
-            <input type="range" min={0} max={100} value={noise} onChange={e=>setNoise(+e.target.value)} className="slider w-full mt-1" />
+           <input
+  type="range"
+  min={0}
+  max={1}
+  step={0.01}
+  value={noise}
+  onChange={e=>setNoise(+e.target.value)}
+  className="slider w-full mt-1"
+/>
           </div>
         </div>
 
         <div>
-          <button className="relative px-5 py-2.5 raj font-bold" style={{
+          <button  onClick={() => document.getElementById("audio-upload").click()} className="relative px-5 py-2.5 raj font-bold" style={{
             fontSize:12, letterSpacing:".16em",
             background:"linear-gradient(180deg,rgba(0,200,255,.22) 0%,rgba(0,200,255,.10) 100%)",
             border:"1px solid var(--cyan)",
@@ -151,8 +218,22 @@ function LiveView({ mode, setMode, noise, setNoise, bitrate, setBitrate }) {
             boxShadow:"0 0 14px var(--cyan-glow), inset 0 1px 0 rgba(0,200,255,.2), inset 0 -1px 0 rgba(0,0,0,.5)",
           }}>
             <Corner accent="var(--cyan)" />
-            ▶&nbsp; RUN DEMO SENTENCE
+           ↥&nbsp; UPLOAD AUDIO
           </button>
+          <input
+  id="audio-upload"
+  type="file"
+  accept="audio/*"
+  className="hidden"
+  onChange={(e) => {
+  const file = e.target.files?.[0];
+
+  if (file) {
+    setSelectedFile(file);
+    runUploadedAudio(file);
+  }
+}}
+/>
         </div>
       </div>
 
@@ -161,20 +242,27 @@ function LiveView({ mode, setMode, noise, setNoise, bitrate, setBitrate }) {
         <Corner />
         <Orb label="ORIGINAL ACTUAL MESSAGE" sub="SNR 9.2 dB" color="#f59e0b" ring="HIGH NOISE · DEGRADED" noise={0.9} amp={0.65} />
         <FlowLine active={mode === "itantra"} />
-        <Orb label="iTANTRA CLEAN RECONSTRUCTION" sub="SNR 28.6 dB" color={mode === "itantra" ? "#10b981" : "#64748b"} ring={mode === "itantra" ? "98.4% CORRELATION · PROTECTED" : "BASELINE — NO RECONSTRUCTION"} noise={mode === "itantra" ? 0.05 : 0.7} amp={mode === "itantra" ? 0.88 : 0.5} />
+        <Orb label="iTANTRA CLEAN RECONSTRUCTION" sub="SNR 28.6 dB" color={mode === "itantra" ? "#10b981" : "#64748b"} ring={mode === "itantra"
+  ? `${Math.round(((pipelineResult?.protection_per_token || []).filter(v => v >= 0.7).length / (pipelineResult?.protection_per_token?.length || 1)) * 100)}% PROTECTED`
+  : "BASELINE — NO RECONSTRUCTION"} noise={mode === "itantra" ? 0.05 : 0.7} amp={mode === "itantra" ? 0.88 : 0.5} />
       </div>
 
       {/* Audio Player Section with Full Width */}
-      <AudioPlayerSection noise={noise} />
+      <AudioPlayerSection
+  noise={noise}
+  pipelineResult={pipelineResult}
+  pipelineLoading={pipelineLoading}
+   selectedFile={selectedFile}
+/>
 
       {/* Bottom Section Split: Left 4 Stacked Blocks & Right Transcript/Bandwidth Chart */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
         {/* Left Stacked Meta/Info Blocks (4 Blocks vertically) */}
         <div className="md:col-span-4 flex flex-col gap-2">
           {[
-            { k:"LANGUAGE",    v:"HI — HINDI",    c:"var(--cyan)"  },
+            {k:"LANGUAGE", v:pipelineResult?.language ? pipelineResult.language.toUpperCase() : "—", c:"var(--cyan)"},
             { k:"MODE",        v:mode==="itantra"?"iTANTRA":"BASELINE", c:mode==="itantra"?"var(--cyan)":"var(--amber)" },
-            { k:"PACKET SIZE", v:"214 B",          c:"var(--mid)"   },
+          {k:"PACKET SIZE", v:pipelineResult?.packet_bytes ? `${pipelineResult.packet_bytes} B` : "—", c:"var(--mid)"},
             { k:"CHANNEL",     v:"UHF-04",         c:"var(--blue)"  },
           ].map(({ k, v, c }) => (
             <div key={k} className="card px-3 py-3 relative" style={{ borderRadius:2 }}>
@@ -191,7 +279,7 @@ function LiveView({ mode, setMode, noise, setNoise, bitrate, setBitrate }) {
           <SecHead led="c">Transcript — Live Reconstruction</SecHead>
           <div className="lbl mb-2" style={{ fontSize:8 }}>INCOMING MESSAGE — WORD-LEVEL PROTECTION ANALYSIS</div>
           <div className="flex flex-wrap gap-2 mb-4">
-            {TRANSCRIPT.map(({ w, ok }) => (
+          {transcriptWords.map(({ w, ok }) => (
               <div key={w} className="flex flex-col items-center gap-1">
                 <span className={ok ? "badge-g" : "badge-r"} style={{ fontSize:10, padding:"2px 8px" }}>{w}</span>
                 <span className="lbl" style={{ fontSize:7, color:ok?"var(--green)":"var(--red)" }}>
@@ -210,7 +298,7 @@ function LiveView({ mode, setMode, noise, setNoise, bitrate, setBitrate }) {
   );
 }
 
-function AnalyticsView() {
+function AnalyticsView({ pipelineResult }) {
   const METRICS = [
     { label:"AVG SNR GAIN",     value:"+19.4 dB", color:"var(--cyan)",  sub:"vs baseline" },
     { label:"PACKET LOSS REDUCE", value:"73.2%",    color:"var(--green)", sub:"protected"   },
@@ -223,7 +311,8 @@ function AnalyticsView() {
   return (
     <div className="flex flex-col gap-3 overflow-auto flex-1" style={{ padding:"12px 16px" }}>
       <TelemetryGrid metrics={METRICS} />
-      <TrajectoryChart data={SNR_DATA} />
+     
+     <TrajectoryChart data={SNR_DATA(pipelineResult)} />
 
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
         <div className="card relative p-4" style={{ borderRadius:2 }}>
@@ -296,9 +385,12 @@ function AnalyticsView() {
 export default function App() {
   const [tab, setTab] = useState("live");
   const [mode, setMode] = useState("itantra");
-  const [noise, setNoise] = useState(65);
+  const [noise, setNoise] = useState(0.65);
    const [bitrate, setBitrate] = useState(3.5);
-
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [pipelineLoading, setPipelineLoading] = useState(false);
+  const [pipelineResult, setPipelineResult] = useState(null);
+  
   return (
     <div className="flex flex-col h-screen select-none" style={{ background: "var(--bg)", color: "var(--text)", fontFamily: "JetBrains Mono, monospace" }}>
       <Header tab={tab} setTab={setTab} />
@@ -306,13 +398,28 @@ export default function App() {
       {/* Main Container with Sidebar Layout */}
       <main className="flex-1 flex overflow-hidden relative p-3 gap-3">
         <div className="flex-1 flex flex-col overflow-hidden">
-         {tab === "live" && <LiveView mode={mode} setMode={setMode} noise={noise} setNoise={setNoise} bitrate={bitrate} setBitrate={setBitrate} />}
-          {tab === "analytics" && <AnalyticsView />}
+        {tab === "live" && (
+  <LiveView
+    mode={mode}
+    setMode={setMode}
+    noise={noise}
+    setNoise={setNoise}
+    bitrate={bitrate}
+    setBitrate={setBitrate}
+    selectedFile={selectedFile}
+    setSelectedFile={setSelectedFile}
+    pipelineLoading={pipelineLoading}
+    setPipelineLoading={setPipelineLoading}
+    pipelineResult={pipelineResult}
+    setPipelineResult={setPipelineResult}
+  />
+)}
+         {tab === "analytics" && <AnalyticsView pipelineResult={pipelineResult} />}
         </div>
         
         {/* Right Speaker Sidebar */}
-        <div className="flex-shrink-0 overflow-y-auto">
-          <SpeakerSidebar />
+        <div className="flex-shrink-0 overflow-hidden h-full">
+         <SpeakerSidebar pipelineResult={pipelineResult} />
         </div>
       </main>
 

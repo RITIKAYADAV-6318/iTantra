@@ -16,7 +16,7 @@ function L({ c, pulse }) {
   return <span className={`led led-${c}${pulse ? " pulse" : ""}`} />;
 }
 
-function AudioPlayer({ label, color, noisy, playing, onToggle }) {
+function AudioPlayer({ label, color, noisy, playing, onToggle, disabled }) {
   const btnBg = playing ? color + "18" : "var(--dim)";
   const btnBorder = playing ? color : "var(--border)";
 
@@ -24,10 +24,11 @@ function AudioPlayer({ label, color, noisy, playing, onToggle }) {
     <div className="flex items-center gap-3 py-2 px-3" style={{ background: "var(--panel-dk)", border: "1px solid var(--border-lo)" }}>
       <button
         onClick={onToggle}
+         disabled={disabled}
         className="flex-shrink-0 flex items-center justify-center"
-        style={{ width: 28, height: 28, borderRadius: 2, background: btnBg, border: "1px solid " + btnBorder, color }}
+        style={{ width: 38, height: 38, borderRadius: 2, background: btnBg, border: "1px solid " + btnBorder, color }}
       >
-        <span style={{ fontSize: 9 }}>{playing ? "■" : "▶"}</span>
+        <span style={{ fontSize: 20 }}>{playing ? "■" : "▶"}</span>
       </button>
       <div className="lbl" style={{ minWidth: 120, color }}>{label}</div>
       <div className="flex-1 inset overflow-hidden" style={{ height: 28, padding: "2px 4px" }}>
@@ -72,27 +73,99 @@ function Arrow({ color }) {
   );
 }
 
-export default function AudioPlayerSection({ noise }) {
+export default function AudioPlayerSection({ noise, pipelineResult, pipelineLoading, selectedFile }) {
   const [playing1, setPlaying1] = useState(false);
   const [playing2, setPlaying2] = useState(false);
+    const [audioUrl, setAudioUrl] = useState(null);
+
+  const hasOutputAudio = Boolean(pipelineResult?.audio_base64);
+
+    const [inputAudioUrl, setInputAudioUrl] = useState(null);
+
+  React.useEffect(() => {
+    if (!selectedFile) {
+      setInputAudioUrl(null);
+      return;
+    }
+
+    const url = URL.createObjectURL(selectedFile);
+    setInputAudioUrl(url);
+
+    return () => URL.revokeObjectURL(url);
+  }, [selectedFile]);
+
+    React.useEffect(() => {
+    if (!pipelineResult?.audio_base64) {
+      setAudioUrl(null);
+      return;
+    }
+
+    const byteCharacters = atob(pipelineResult.audio_base64);
+    const byteNumbers = new Array(byteCharacters.length);
+
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+
+    const byteArray = new Uint8Array(byteNumbers);
+
+    const blob = new Blob([byteArray], {
+      type: "audio/wav",
+    });
+
+    const url = URL.createObjectURL(blob);
+    setAudioUrl(url);
+
+    return () => URL.revokeObjectURL(url);
+  }, [pipelineResult]);
 
   return (
     <div className="flex flex-col gap-2" style={{ minWidth: 240 }}>
       <div className="lbl mb-1">AUDIO PLAYBACK COMPARISON</div>
-      <AudioPlayer
-        label="BEFORE — Normal Call"
-        color="#f59e0b"
-        noisy
-        playing={playing1}
-        onToggle={() => setPlaying1(p => !p)}
-      />
-      <AudioPlayer
-        label="AFTER — iTantra Mode"
-        color="#06b6d4"
-        noisy={false}
-        playing={playing2}
-        onToggle={() => setPlaying2(p => !p)}
-      />
+     <audio id="original-input-audio" src={inputAudioUrl} />
+
+<AudioPlayer
+  label="BEFORE — Normal Call"
+  color="#f59e0b"
+  noisy
+  playing={playing1}
+  disabled={!inputAudioUrl || pipelineLoading}
+  onToggle={() => {
+    const audio = document.getElementById("original-input-audio");
+
+    if (!audio || !inputAudioUrl) return;
+
+    if (audio.paused) {
+      audio.play();
+      setPlaying1(true);
+    } else {
+      audio.pause();
+      setPlaying1(false);
+    }
+  }}
+/>
+      <audio id="itantra-output-audio" src={audioUrl} />
+
+<AudioPlayer
+  label="AFTER — iTantra Mode"
+  color="#06b6d4"
+  noisy={false}
+  playing={playing2}
+  disabled={!hasOutputAudio || pipelineLoading}
+  onToggle={() => {
+    const audio = document.getElementById("itantra-output-audio");
+
+    if (!audio || !audioUrl) return;
+
+    if (audio.paused) {
+      audio.play();
+      setPlaying2(true);
+    } else {
+      audio.pause();
+      setPlaying2(false);
+    }
+  }}
+/>
       <div className="card p-3 relative flex-1" style={{ borderRadius: 2 }}>
         <Corner accent="var(--amber-a10)" />
         <div className="lbl mb-2" style={{ fontSize: 8 }}>SIGNAL PATH</div>
